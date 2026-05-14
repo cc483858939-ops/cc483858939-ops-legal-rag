@@ -1,0 +1,121 @@
+services:
+  qdrant:
+    image: qdrant/qdrant:v1.10.1
+    container_name: legal-rag-qdrant
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - qdrant_storage:/qdrant/storage
+
+  api:
+    build:
+      context: .
+      args:
+        INSTALL_MODEL_EXTRAS: ${INSTALL_MODEL_EXTRAS:-false}
+        INSTALL_DEV: "false"
+    container_name: legal-rag-api
+    environment:
+      QDRANT_URL: http://qdrant:6333
+      QDRANT_COLLECTION: ${QDRANT_COLLECTION:-legal_rag}
+      EMBEDDING_BACKEND: ${EMBEDDING_BACKEND:-fastembed}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-BAAI/bge-large-en-v1.5}
+      SPARSE_MODEL: ${SPARSE_MODEL:-Qdrant/bm25}
+      RERANKER_MODEL: ${RERANKER_MODEL:-cross-encoder/ms-marco-MiniLM-L6-v2}
+      RERANKER_ONNX_FILE: ${RERANKER_ONNX_FILE:-onnx/model_quint8_avx2.onnx}
+      QUERY_REWRITE_BACKEND: ${QUERY_REWRITE_BACKEND:-none}
+      QUERY_REWRITE_BASE_URL: ${QUERY_REWRITE_BASE_URL:-http://ollama:11434}
+      QUERY_REWRITE_MODEL: ${QUERY_REWRITE_MODEL:-gemma4:e2b}
+      QUERY_REWRITE_TIMEOUT_SECONDS: ${QUERY_REWRITE_TIMEOUT_SECONDS:-8}
+      INFERRED_METADATA_FILTERS_ENABLED: ${INFERRED_METADATA_FILTERS_ENABLED:-true}
+      QUERY_REWRITE_FILTER_MIN_CONFIDENCE: ${QUERY_REWRITE_FILTER_MIN_CONFIDENCE:-0.55}
+      QUERY_EXTENSION_MIN_SIMILARITY: ${QUERY_EXTENSION_MIN_SIMILARITY:-0.45}
+      RERANK_TOP_N: ${RERANK_TOP_N:-20}
+      RERANK_MAX_LENGTH: ${RERANK_MAX_LENGTH:-512}
+      TRACE_ENABLED: ${TRACE_ENABLED:-true}
+      TRACE_PATH: ${TRACE_PATH:-/app/runtime/traces/evidence_traces.json}
+      TRACE_RETENTION_COUNT: ${TRACE_RETENTION_COUNT:-10}
+      TRACE_INCLUDE_TEXT: ${TRACE_INCLUDE_TEXT:-false}
+      TRACE_TEXT_CHARS: ${TRACE_TEXT_CHARS:-300}
+      TRACE_MAX_ITEMS_PER_STAGE: ${TRACE_MAX_ITEMS_PER_STAGE:-20}
+      HF_HOME: /models/huggingface
+      TRANSFORMERS_CACHE: /models/huggingface
+      FASTEMBED_CACHE_PATH: /models/fastembed
+    volumes:
+      - model_cache:/models
+      - ./runtime/traces:/app/runtime/traces
+    ports:
+      - "8088:8080"
+    depends_on:
+      - qdrant
+    command: ["uvicorn", "legal_rag.api:app", "--host", "0.0.0.0", "--port", "8080"]
+
+  cli:
+    build:
+      context: .
+      args:
+        INSTALL_MODEL_EXTRAS: ${INSTALL_MODEL_EXTRAS:-false}
+        INSTALL_DEV: "false"
+    container_name: legal-rag-cli
+    environment:
+      QDRANT_URL: http://qdrant:6333
+      QDRANT_COLLECTION: ${QDRANT_COLLECTION:-legal_rag}
+      EMBEDDING_BACKEND: ${EMBEDDING_BACKEND:-fastembed}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-BAAI/bge-large-en-v1.5}
+      SPARSE_MODEL: ${SPARSE_MODEL:-Qdrant/bm25}
+      RERANKER_MODEL: ${RERANKER_MODEL:-cross-encoder/ms-marco-MiniLM-L6-v2}
+      RERANKER_ONNX_FILE: ${RERANKER_ONNX_FILE:-onnx/model_quint8_avx2.onnx}
+      QUERY_REWRITE_BACKEND: ${QUERY_REWRITE_BACKEND:-none}
+      QUERY_REWRITE_BASE_URL: ${QUERY_REWRITE_BASE_URL:-http://ollama:11434}
+      QUERY_REWRITE_MODEL: ${QUERY_REWRITE_MODEL:-gemma4:e2b}
+      QUERY_REWRITE_TIMEOUT_SECONDS: ${QUERY_REWRITE_TIMEOUT_SECONDS:-8}
+      INFERRED_METADATA_FILTERS_ENABLED: ${INFERRED_METADATA_FILTERS_ENABLED:-true}
+      QUERY_REWRITE_FILTER_MIN_CONFIDENCE: ${QUERY_REWRITE_FILTER_MIN_CONFIDENCE:-0.55}
+      QUERY_EXTENSION_MIN_SIMILARITY: ${QUERY_EXTENSION_MIN_SIMILARITY:-0.45}
+      RERANK_TOP_N: ${RERANK_TOP_N:-20}
+      RERANK_MAX_LENGTH: ${RERANK_MAX_LENGTH:-512}
+      TRACE_ENABLED: ${TRACE_ENABLED:-true}
+      TRACE_PATH: ${TRACE_PATH:-/app/runtime/traces/evidence_traces.json}
+      TRACE_RETENTION_COUNT: ${TRACE_RETENTION_COUNT:-10}
+      TRACE_INCLUDE_TEXT: ${TRACE_INCLUDE_TEXT:-false}
+      TRACE_TEXT_CHARS: ${TRACE_TEXT_CHARS:-300}
+      TRACE_MAX_ITEMS_PER_STAGE: ${TRACE_MAX_ITEMS_PER_STAGE:-20}
+      HF_HOME: /models/huggingface
+      TRANSFORMERS_CACHE: /models/huggingface
+      FASTEMBED_CACHE_PATH: /models/fastembed
+    volumes:
+      - model_cache:/models
+      - ./runtime/traces:/app/runtime/traces
+    command: ["legal-rag", "--help"]
+
+  test:
+    build:
+      context: .
+      args:
+        INSTALL_MODEL_EXTRAS: "false"
+        INSTALL_DEV: "true"
+    container_name: legal-rag-test
+    environment:
+      QDRANT_URL: http://qdrant:6333
+      RERANKER_MODEL: ""
+      QUERY_REWRITE_BACKEND: none
+      INFERRED_METADATA_FILTERS_ENABLED: "true"
+      QUERY_REWRITE_FILTER_MIN_CONFIDENCE: "0.55"
+      QUERY_EXTENSION_MIN_SIMILARITY: "0.45"
+      TRACE_ENABLED: "false"
+    command: ["pytest", "-q"]
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: legal-rag-ollama
+    profiles: ["llm"]
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_models:/root/.ollama
+    gpus: all
+
+volumes:
+  qdrant_storage:
+  model_cache:
+  ollama_models:
