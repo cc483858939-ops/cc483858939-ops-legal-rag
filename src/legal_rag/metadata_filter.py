@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from datetime import date
 from typing import Any
@@ -16,9 +17,21 @@ VALUE_FILTER_FIELDS = frozenset(
         "section",
     }
 )
+METADATA_VALUE_FILTER_FIELDS = frozenset(
+    {
+        "domain",
+        "collection",
+        "product",
+        "category",
+        "locale",
+        "channel",
+        "customer_tier",
+        "policy_version",
+    }
+)
 DATE_FILTER_FIELDS = frozenset({"date_from", "date_to"})
-ALLOWED_FILTER_FIELDS = VALUE_FILTER_FIELDS | DATE_FILTER_FIELDS
-ALLOWED_DOC_TYPES = frozenset({"statute", "case", "regulation", "other"})
+ALLOWED_FILTER_FIELDS = VALUE_FILTER_FIELDS | METADATA_VALUE_FILTER_FIELDS | DATE_FILTER_FIELDS
+SAFE_FILTER_VALUE = re.compile(r"^[\w .:/§&(),+\-]+$")
 
 
 @dataclass(frozen=True)
@@ -131,7 +144,7 @@ def matches_metadata_filters(chunk: DocumentChunk, filters: MetadataFilters | No
     if filters is None or filters.is_empty:
         return True
     for key, values in filters.values.items():
-        value = getattr(chunk, key, None)
+        value = _chunk_filter_value(chunk, key)
         if value is None or str(value) not in values:
             return False
     if filters.date_from is not None:
@@ -151,12 +164,13 @@ def build_qdrant_filter(filters: MetadataFilters | None):
 
     must = []
     for key, values in filters.values.items():
+        payload_key = f"metadata.{key}" if key in METADATA_VALUE_FILTER_FIELDS else key
         match = (
             models.MatchValue(value=values[0])
             if len(values) == 1
             else models.MatchAny(any=list(values))
         )
-        must.append(models.FieldCondition(key=key, match=match))
+        must.append(models.FieldCondition(key=payload_key, match=match))
 
     if filters.date_from is not None or filters.date_to is not None:
         must.append(
@@ -194,6 +208,12 @@ def _normalize_filter_dict(
             )
             continue
         if key in VALUE_FILTER_FIELDS:
+            normalized_values, value_discards = _normalize_values(key, raw_value, source=source)
+            discarded.extend(value_discards)
+            if normalized_values:
+                values[key] = tuple(normalized_values)
+            continue
+        if key in METADATA_VALUE_FILTER_FIELDS:
             normalized_values, value_discards = _normalize_values(key, raw_value, source=source)
             discarded.extend(value_discards)
             if normalized_values:
@@ -247,18 +267,26 @@ def _normalize_values(
         value = item.strip()
         if key == "doc_type":
             value = value.lower()
-            if value not in ALLOWED_DOC_TYPES:
-                discarded.append(DiscardedMetadataFilter(source, key, item, "invalid_doc_type"))
-                continue
         elif key == "jurisdiction":
             value = value.upper()
+        elif key == "locale":
+            value = value.lower()
         if not value:
             discarded.append(DiscardedMetadataFilter(source, key, item, "empty_filter_value"))
+            continue
+        if len(value) > 120 or not SAFE_FILTER_VALUE.match(value):
+            discarded.append(DiscardedMetadataFilter(source, key, item, "unsafe_filter_value"))
             continue
         if value not in seen:
             seen.add(value)
             output.append(value)
     return output, discarded
+
+
+def _chunk_filter_value(chunk: DocumentChunk, key: str) -> Any:
+    if key in METADATA_VALUE_FILTER_FIELDS:
+        return chunk.metadata.get(key)
+    return getattr(chunk, key, None)
 
 
 def _parse_date_filter(

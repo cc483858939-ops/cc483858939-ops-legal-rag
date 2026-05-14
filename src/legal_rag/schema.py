@@ -11,7 +11,7 @@ class DocumentChunk(BaseModel):
 
     chunk_id: str
     source_id: str
-    doc_type: Literal["statute", "case", "regulation", "other"]
+    doc_type: str
     title: str
     citation: str
     jurisdiction: str = "US"

@@ -62,6 +62,7 @@ def build_chunks(
                     section=section or item.section,
                     text=content,
                     metadata={
+                        **item.metadata,
                         "source_path": item.path,
                         "source_url": item.url,
                         "chunk_index": chunk_index,

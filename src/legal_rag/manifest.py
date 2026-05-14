@@ -26,6 +26,7 @@ def load_manifest(path: str | Path) -> list[SourceItem]:
                 section=raw.get("section"),
                 path=_resolve_relative(manifest_path.parent, raw.get("path")),
                 url=raw.get("url"),
+                metadata=raw.get("metadata") if isinstance(raw.get("metadata"), dict) else {},
             )
         )
     return items

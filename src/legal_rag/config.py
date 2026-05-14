@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from dotenv import load_dotenv
 from pydantic import Field
@@ -68,6 +69,7 @@ class SourceItem:
     section: str | None
     path: str | None
     url: str | None
+    metadata: dict[str, Any]
 
 
 def load_settings(env_file: str | Path | None = None) -> Settings:

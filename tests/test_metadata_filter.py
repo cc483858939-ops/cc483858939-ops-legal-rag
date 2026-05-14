@@ -13,13 +13,13 @@ from legal_rag.schema import DocumentChunk
 
 def test_explicit_filters_are_hard_filters() -> None:
     decision = normalize_metadata_filters(
-        explicit_filters={"doc_type": "case", "jurisdiction": "us"},
+        explicit_filters={"doc_type": "knowledge_base", "jurisdiction": "us"},
         rewrite_filters={},
         rewrite_confidence=None,
     )
 
     assert decision.effective.as_dict() == {
-        "doc_type": ["case"],
+        "doc_type": ["knowledge_base"],
         "jurisdiction": ["US"],
     }
 
@@ -55,7 +55,7 @@ def test_rewrite_filters_conflicting_with_explicit_filters_are_discarded() -> No
 def test_invalid_fields_and_values_are_discarded() -> None:
     decision = normalize_metadata_filters(
         explicit_filters={
-            "doc_type": ["case", "bad"],
+            "doc_type": ["case", "<script>"],
             "date_from": "not-a-date",
             "topic": "copyright",
         },
@@ -65,7 +65,7 @@ def test_invalid_fields_and_values_are_discarded() -> None:
 
     assert decision.effective.as_dict() == {"doc_type": ["case"]}
     assert {item.reason for item in decision.discarded} == {
-        "invalid_doc_type",
+        "unsafe_filter_value",
         "invalid_iso_date",
         "unsupported_filter_field",
     }
@@ -87,6 +87,17 @@ def test_canonical_qdrant_filter_uses_match_any_and_date_range() -> None:
     assert payload["must"][1]["match"]["value"] == "US"
     assert payload["must"][2]["key"] == "date"
     assert payload["must"][2]["range"]["gte"] == "2000-01-01T00:00:00"
+
+
+def test_qdrant_filter_uses_nested_metadata_payload_keys() -> None:
+    qdrant_filter = build_qdrant_filter(
+        MetadataFilters(values={"domain": ("operations",), "product": ("platform",)})
+    )
+
+    payload = qdrant_filter.model_dump(mode="json")
+    assert payload["must"][0]["key"] == "metadata.domain"
+    assert payload["must"][0]["match"]["value"] == "operations"
+    assert payload["must"][1]["key"] == "metadata.product"
 
 
 def test_in_memory_filter_matching_uses_top_level_metadata() -> None:
@@ -113,3 +124,40 @@ def test_in_memory_filter_matching_uses_top_level_metadata() -> None:
         chunk,
         MetadataFilters(values={"doc_type": ("statute",)}),
     )
+
+
+def test_metadata_filters_can_target_nested_business_metadata() -> None:
+    chunk = DocumentChunk(
+        chunk_id="doc-1",
+        source_id="platform-policy",
+        doc_type="policy",
+        title="Platform Policy",
+        citation="Platform Policy v2026.05",
+        jurisdiction="GLOBAL",
+        date=date(2026, 5, 1),
+        text="Platform policy records the current operational rule.",
+        metadata={
+            "domain": "operations",
+            "product": "platform",
+            "category": "policy",
+            "locale": "zh-cn",
+            "policy_version": "2026.05",
+        },
+    )
+
+    decision = normalize_metadata_filters(
+        explicit_filters={
+            "domain": "operations",
+            "product": "platform",
+            "locale": "ZH-CN",
+        },
+        rewrite_filters={},
+        rewrite_confidence=None,
+    )
+
+    assert decision.effective.as_dict() == {
+        "domain": ["operations"],
+        "product": ["platform"],
+        "locale": ["zh-cn"],
+    }
+    assert matches_metadata_filters(chunk, decision.effective)
