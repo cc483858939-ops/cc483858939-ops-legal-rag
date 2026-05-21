@@ -1,0 +1,14 @@
+Section account.password_reset.
+Account access support. Customers can reset a password through the password reset link sent to the verified email address. Support must not set a password for the customer. If the customer cannot access the verified email, support should start account recovery instead of changing the email directly.
+
+中文要点：用户忘记密码时，客服只能引导用户用已验证邮箱重置密码，不能替用户设置密码。邮箱也丢失时走账户恢复流程。
+
+Section account.two_factor.
+Two-factor authentication recovery requires identity verification through the verified email, a backup code, or a previously trusted device. If the customer has lost both the authenticator app and backup codes, support must escalate to account security review. Standard agents must not disable 2FA without security approval.
+
+中文要点：用户问“两步验证备份码丢了怎么办”时，需要验证邮箱、备份码或可信设备。验证器和备份码都丢失时，必须升级到安全审核，普通客服不能直接关闭 2FA。
+
+Section account.takeover.
+Suspected account takeover cases are high priority. Signals include unfamiliar orders, changed email, changed phone number, failed password reset attempts, or customer reports that sessions remain active on unknown devices. Support should lock risky account actions, revoke active sessions when available, and escalate to account security.
+
+中文要点：疑似盗号、陌生订单、邮箱手机号被改、未知设备在线，都要升级安全团队并限制高风险操作。

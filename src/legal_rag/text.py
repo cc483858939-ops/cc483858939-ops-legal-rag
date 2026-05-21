@@ -3,7 +3,8 @@ from __future__ import annotations
 import re
 from collections.abc import Iterable
 
-TOKEN_RE = re.compile(r"[a-zA-Z0-9_]+")
+TOKEN_RE = re.compile(r"[a-zA-Z0-9_]+|[\u4e00-\u9fff]+")
+CJK_RE = re.compile(r"[\u4e00-\u9fff]")
 
 
 def normalize_whitespace(text: str) -> str:
@@ -14,8 +15,20 @@ def tokenize(text: str) -> list[str]:
     normalized = text.lower()
     normalized = re.sub(r"\bu\.s\.c\.", "usc", normalized)
     normalized = re.sub(r"\bu\.s\.", "us", normalized)
-    tokens = TOKEN_RE.findall(normalized)
-    return [token for token in tokens if len(token) > 1]
+    tokens: list[str] = []
+    for token in TOKEN_RE.findall(normalized):
+        if CJK_RE.search(token):
+            tokens.extend(_cjk_bigrams(token))
+        elif len(token) > 1:
+            tokens.append(token)
+    return tokens
+
+
+def _cjk_bigrams(token: str) -> list[str]:
+    chars = [char for char in token if CJK_RE.match(char)]
+    if len(chars) <= 1:
+        return chars
+    return ["".join(chars[index : index + 2]) for index in range(len(chars) - 1)]
 
 
 def chunk_text(text: str, *, max_words: int = 220, overlap_words: int = 40) -> list[str]:

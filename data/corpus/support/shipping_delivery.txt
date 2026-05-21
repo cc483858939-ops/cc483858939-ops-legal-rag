@@ -1,0 +1,14 @@
+Section shipping.speeds.
+Support shipping policy. Standard shipping normally takes 3 to 5 business days after fulfillment. Express shipping normally takes 1 to 2 business days after fulfillment. Same-day delivery is available only in supported metro areas and only for orders placed before the daily cutoff time shown at checkout.
+
+中文要点：用户问“多久送到”“标准配送几天”“加急几天”时，本条适用。标准配送通常是发货后 3 到 5 个工作日；加急配送通常是发货后 1 到 2 个工作日。
+
+Section shipping.tracking.
+Tracking is created when the fulfillment team prints the carrier label. Tracking can take up to 24 hours to show carrier movement. If tracking has not updated for 72 hours after the first scan, support should open a carrier investigation. If a package is marked delivered but the customer did not receive it, support should ask the customer to check secure locations, household members, and building staff before opening a missing package case.
+
+中文要点：物流单号生成不代表包裹已经揽收。物流信息可能需要 24 小时才更新。若首扫后 72 小时没有更新，可以发起承运商调查。
+
+Section shipping.lost_damage.
+For lost or damaged delivery claims, support must collect the order number, tracking number, delivery photo if available, product photo for damage, and customer contact information. Replacement or refund is approved only after carrier claim review or internal fulfillment confirmation.
+
+中文要点：包裹丢失或破损需要订单号、物流号、签收照片或破损照片。是否补发或退款，需要承运商或仓库确认。

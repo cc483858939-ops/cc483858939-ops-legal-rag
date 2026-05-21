@@ -9,28 +9,28 @@ import httpx
 
 from legal_rag.embeddings import DenseEmbedder, cosine_similarity
 
-SYSTEM_PROMPT = """You rewrite legal retrieval queries. Do not answer the legal question.
+SYSTEM_PROMPT = """You rewrite personal knowledge-base retrieval queries. Do not answer the question.
 Return one compact JSON object only. No markdown.
 The JSON schema is:
 {
-  "canonical_query": "short English legal search query or null",
-  "search_queries": ["2-4 concise legal search queries"],
-  "aliases": ["case names, citations, abbreviations, translations"],
-  "filters": {"doc_type": "case|statute|regulation|other|null", "jurisdiction": "US|null"},
+  "canonical_query": "short normalized retrieval query or null",
+  "search_queries": ["2-4 concise retrieval queries"],
+  "aliases": ["entity aliases, translations, abbreviations"],
+  "filters": {},
   "confidence": 0.0
 }
 Rules:
 - Preserve the user's intent.
-- Expand Chinese legal names into likely English case names, statute names, citations, and acronyms.
-- Prefer canonical party names, official citations, statute numbers, and well-known acronyms
-  over generic terms.
+- Expand Chinese aliases into likely entity names, translations, abbreviations, and domain terms.
+- Prefer concrete entity names, document titles, proper nouns, and user-provided keywords over generic terms.
 - If uncertain, keep expansions broad and set confidence below 0.5.
 - Do not invent that a document exists in the corpus.
 - Do not provide an answer, analysis, or citations as facts.
 Examples:
 - 辛普森案 -> O.J. Simpson murder trial; People v. Simpson; Orenthal James Simpson.
 - 版权合理使用 -> fair use; 17 U.S.C. § 107; Campbell v. Acuff-Rose.
-- 起诉标准 合理可信 -> plausibility pleading; Bell Atlantic Corp. v. Twombly; Ashcroft v. Iqbal.
+- 退款多久到账 -> refund processing time; refund timeline.
+- 如何评价炫神 -> 炫神; Xuan Shen; evaluation.
 """
 
 
@@ -419,7 +419,10 @@ def clean_text_list(value: Any, *, limit: int) -> list[str]:
 
 
 def normalize_query_part(value: Any) -> str:
-    return re.sub(r"\s+", " ", str(value or "")).strip()
+    clean = re.sub(r"\s+", " ", str(value or "")).strip()
+    if clean.casefold() in {"", "none", "null", "nil", "n/a", "na"}:
+        return ""
+    return clean
 
 
 def parse_confidence(value: Any) -> float | None:

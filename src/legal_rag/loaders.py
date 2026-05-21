@@ -84,7 +84,9 @@ def _read_xml_text(path: Path) -> str:
 
 def _split_sections(text: str) -> list[tuple[str | None, str]]:
     normalized = text.replace("\r\n", "\n")
-    pattern = re.compile(r"(?m)^\s*(Section|§)\s+([A-Za-z0-9_.-]+)\.?\s*(.*)$")
+    pattern = re.compile(
+        r"(?m)^[^\S\r\n]*(Section|§)[^\S\r\n]+([A-Za-z0-9_.-]+)\.?[^\S\r\n]*(.*)$"
+    )
     matches = list(pattern.finditer(normalized))
     if not matches:
         return [(None, normalize_whitespace(normalized))]

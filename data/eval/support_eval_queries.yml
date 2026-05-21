@@ -1,0 +1,64 @@
+queries:
+  - id: support-refund-timing-cn
+    query: "退款多久到账"
+    expected_citations:
+      - "Support KB Returns and Refunds v2026.05"
+    category: support_returns_cn
+    tags: ["support", "refund", "chinese"]
+    filters:
+      domain: customer_support
+      category: returns
+  - id: support-standard-shipping-en
+    query: "How long does standard shipping take?"
+    expected_citations:
+      - "Support KB Shipping and Delivery v2026.05"
+    category: support_shipping_en
+    tags: ["support", "shipping"]
+    filters:
+      domain: customer_support
+      category: shipping
+  - id: support-address-change-cn
+    query: "订单发货后还能改地址吗"
+    expected_citations:
+      - "Support KB Order Changes v2026.05"
+    category: support_orders_cn
+    tags: ["support", "order", "chinese"]
+    filters:
+      domain: customer_support
+      category: orders
+  - id: support-2fa-recovery-cn
+    query: "两步验证备份码丢了怎么办"
+    expected_citations:
+      - "Support KB Account Security v2026.05"
+    category: support_account_cn
+    tags: ["support", "security", "chinese"]
+    filters:
+      domain: customer_support
+      category: account_security
+  - id: support-renewal-refund-cn
+    query: "续费后没用可以退款吗"
+    expected_citations:
+      - "Support KB Subscription Billing v2026.05"
+    category: support_billing_cn
+    tags: ["support", "subscription", "chinese"]
+    filters:
+      domain: customer_support
+      category: billing
+  - id: support-liquid-damage-cn
+    query: "设备进水损坏保修吗"
+    expected_citations:
+      - "Support KB Warranty Repair v2026.05"
+    category: support_warranty_cn
+    tags: ["support", "warranty", "chinese"]
+    filters:
+      domain: customer_support
+      category: warranty
+  - id: support-human-escalation-cn
+    query: "什么时候会转人工客服"
+    expected_citations:
+      - "Support KB Escalation v2026.05"
+    category: support_escalation_cn
+    tags: ["support", "escalation", "chinese"]
+    filters:
+      domain: customer_support
+      category: escalation

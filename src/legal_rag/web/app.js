@@ -1,8 +1,49 @@
 const STORAGE_KEY = "legal-rag-evidence-chat-v1";
+const LLM_CONFIG_KEY = "legal-rag-llm-config-v1";
+const ANSWER_MODE_VERSION = 2;
+
+const LLM_PRESETS = {
+  "ollama-gemma4": {
+    provider: "openai_compatible",
+    baseUrl: "http://ollama:11434/v1",
+    model: "gemma4:e2b",
+  },
+  "deepseek-chat": {
+    provider: "openai_compatible",
+    baseUrl: "https://api.deepseek.com/v1",
+    model: "deepseek-chat",
+  },
+  "openai-compatible": {
+    provider: "openai_compatible",
+    baseUrl: "https://api.openai.com/v1",
+    model: "gpt-4o-mini",
+  },
+  openrouter: {
+    provider: "openai_compatible",
+    baseUrl: "https://openrouter.ai/api/v1",
+    model: "openai/gpt-4o-mini",
+  },
+  siliconflow: {
+    provider: "openai_compatible",
+    baseUrl: "https://api.siliconflow.cn/v1",
+    model: "Qwen/Qwen2.5-7B-Instruct",
+  },
+  lmstudio: {
+    provider: "openai_compatible",
+    baseUrl: "http://host.docker.internal:1234/v1",
+    model: "local-model",
+  },
+  custom: {
+    provider: "openai_compatible",
+    baseUrl: "",
+    model: "",
+  },
+};
 
 const state = {
   mode: "hybrid",
   messages: loadMessages(),
+  llmConfig: loadLLMConfig(),
 };
 
 const els = {
@@ -18,11 +59,23 @@ const els = {
   filterCourt: document.querySelector("#filterCourt"),
   filterDateFrom: document.querySelector("#filterDateFrom"),
   filterDateTo: document.querySelector("#filterDateTo"),
+  filterDomain: document.querySelector("#filterDomain"),
+  filterProduct: document.querySelector("#filterProduct"),
+  filterCategory: document.querySelector("#filterCategory"),
+  filterLocale: document.querySelector("#filterLocale"),
+  answerEnabled: document.querySelector("#answerEnabled"),
+  llmPreset: document.querySelector("#llmPreset"),
+  llmBaseUrl: document.querySelector("#llmBaseUrl"),
+  llmModel: document.querySelector("#llmModel"),
+  llmApiKey: document.querySelector("#llmApiKey"),
+  llmTemperature: document.querySelector("#llmTemperature"),
+  llmMaxTokens: document.querySelector("#llmMaxTokens"),
   questionInput: document.querySelector("#questionInput"),
   queryForm: document.querySelector("#queryForm"),
   sendBtn: document.querySelector("#sendBtn"),
   emptyState: document.querySelector("#emptyState"),
   chatLog: document.querySelector("#chatLog"),
+  composerShell: document.querySelector(".composer-shell"),
 };
 
 function loadMessages() {
@@ -38,6 +91,33 @@ function loadMessages() {
 function saveMessages() {
   const settledMessages = state.messages.filter((message) => !message.loading);
   window.localStorage.setItem(STORAGE_KEY, JSON.stringify(settledMessages.slice(-20)));
+}
+
+function loadLLMConfig() {
+  try {
+    const raw = window.localStorage.getItem(LLM_CONFIG_KEY);
+    const parsed = raw ? JSON.parse(raw) : {};
+    if (!parsed || typeof parsed !== "object") return {};
+    if (parsed.answerModeVersion !== ANSWER_MODE_VERSION) {
+      return { ...parsed, enabled: true, answerModeVersion: ANSWER_MODE_VERSION };
+    }
+    return parsed;
+  } catch {
+    return {};
+  }
+}
+
+function saveLLMConfig() {
+  const config = {
+    answerModeVersion: ANSWER_MODE_VERSION,
+    enabled: Boolean(els.answerEnabled.checked),
+    preset: els.llmPreset.value,
+    baseUrl: els.llmBaseUrl.value.trim(),
+    model: els.llmModel.value.trim(),
+    temperature: Number(els.llmTemperature.value || 0.2),
+    maxTokens: Number(els.llmMaxTokens.value || 700),
+  };
+  window.localStorage.setItem(LLM_CONFIG_KEY, JSON.stringify(config));
 }
 
 function escapeHtml(value) {
@@ -90,6 +170,7 @@ function render() {
   els.emptyState.hidden = hasMessages;
   els.chatLog.hidden = !hasMessages;
   els.chatLog.innerHTML = state.messages.map(renderMessage).join("");
+  updateComposerMetrics();
 }
 
 function renderMessage(message) {
@@ -115,7 +196,7 @@ function renderMessage(message) {
         <div class="assistant-avatar">R</div>
         <div class="message-bubble assistant-bubble">
           <div class="loading-line"><span></span><span></span><span></span></div>
-          <p>正在检索相关证据...</p>
+          <p>${message.answer ? "正在检索证据并生成回答..." : "正在检索相关证据..."}</p>
         </div>
       </article>
     `;
@@ -144,8 +225,24 @@ function renderMessage(message) {
 }
 
 function renderEvidencePack(pack) {
+  if (pack.retrieval_status === "not_run") {
+    return `${renderRouteDebug(pack)}${renderGeneratedAnswer(pack.answer)}`;
+  }
   const count = Number(pack.hit_count || 0);
-  const summary = count > 0 ? `找到 ${count} 条相关证据` : "没有找到相关证据";
+  const summary =
+    pack.retrieval_status === "model_fallback"
+      ? "个人库未命中，模型通用知识回答"
+      : pack.retrieval_status === "model_answer"
+        ? "模型通用知识回答"
+        : pack.retrieval_status === "no_relevant_evidence" && pack.kb_required
+          ? "严格知识库问题，证据不足"
+          : pack.retrieval_status === "no_relevant_evidence"
+            ? "知识库没有找到直接相关材料"
+            : count > 0 && pack.answer_source === "personal_kb"
+              ? `个人库命中 ${count} 条证据`
+      : count > 0
+        ? `找到 ${count} 条相关证据`
+        : "没有找到相关证据";
   return `
     <div class="pack-heading">
       <div>
@@ -158,11 +255,101 @@ function renderEvidencePack(pack) {
       </div>
     </div>
     <p class="pack-query">${escapeHtml(pack.query)}</p>
+    ${renderRouteDebug(pack)}
     ${renderQueryRewrite(pack.query_rewrite)}
     ${renderQueryExtensions(pack.query_extensions)}
     ${renderMetadataFilters(pack.metadata_filters)}
+    ${renderGeneratedAnswer(pack.answer)}
     <div class="evidence-list">
       ${(pack.hits || []).map(renderEvidenceCard).join("")}
+    </div>
+  `;
+}
+
+function renderGeneratedAnswer(answer) {
+  if (!answer) return "";
+  const llm = answer.llm || {};
+  const modelLabel = llm.model ? `${llm.model}` : "system route";
+  const status = answer.answer_status || (answer.error ? "error" : answer.refused ? "refused" : "answered");
+  const heading = answer.error
+    ? "回答模型调用失败"
+    : {
+        chat: "普通对话",
+        clarification: "需要澄清",
+        acknowledged: "已收到",
+        memory_candidate: "待保存信息",
+        answered: "模型回答",
+        model_fallback: "个人库未命中，模型回答",
+        partial: "基于现有材料",
+        refused: "证据不足",
+        llm_refused: "模型未能回答",
+        error: "回答模型调用失败",
+      }[status] || "模型回答";
+  const content = answer.answer || answer.error || "模型没有返回可展示内容。";
+  const citations = Array.isArray(answer.citations) ? answer.citations : [];
+  return `
+    <section class="answer-panel ${answer.error ? "answer-error" : ""} answer-status-${escapeHtml(status)}">
+      <div class="answer-heading">
+        <p class="pack-kicker">${escapeHtml(modelLabel)}</p>
+        <h3>${escapeHtml(heading)}</h3>
+      </div>
+      <p class="answer-text">${escapeHtml(content)}</p>
+      ${renderGrounding(answer.grounding)}
+      ${
+        citations.length
+          ? `<div class="answer-citations">${citations
+              .map((item) => `<em class="query-token">[${escapeHtml(item.rank)}] ${escapeHtml(item.title)}</em>`)
+              .join(" ")}</div>`
+          : ""
+      }
+    </section>
+  `;
+}
+
+function renderRouteDebug(pack) {
+  if (!pack || !pack.intent) return "";
+  return `
+    <details class="rewrite-panel">
+      <summary>
+        <span>路由决策</span>
+        <strong>${escapeHtml(pack.intent)} · ${formatScore(pack.intent_confidence)}</strong>
+      </summary>
+      <div class="rewrite-body">
+        <p><span>Need retrieval</span>${escapeHtml(pack.need_retrieval)}</p>
+        <p><span>Answer source</span>${escapeHtml(pack.answer_source || "personal_kb")}</p>
+        <p><span>KB required</span>${escapeHtml(pack.kb_required)}</p>
+        <p><span>Model fallback</span>${escapeHtml(pack.allow_model_fallback)}</p>
+        <p><span>Domain</span>${escapeHtml(pack.domain || "unknown")}</p>
+        <p><span>Query type</span>${escapeHtml(pack.query_type || "unknown")}</p>
+        <p><span>Strategy</span>${escapeHtml(pack.retrieval_strategy || "hybrid")}</p>
+        <p><span>Priority</span>${escapeHtml(pack.intent_priority_reason || pack.intent_reason || "--")}</p>
+        <p><span>Source</span>${escapeHtml(pack.intent_source || "--")}</p>
+        ${pack.requires_clarification ? `<p><span>Clarify</span>${escapeHtml(pack.clarification_question || "")}</p>` : ""}
+        ${pack.intent_error ? `<p class="rewrite-error">${escapeHtml(pack.intent_error)}</p>` : ""}
+      </div>
+    </details>
+  `;
+}
+
+function renderGrounding(grounding) {
+  if (!grounding) return "";
+  const cues = Array.isArray(grounding.matched_cues) ? grounding.matched_cues : [];
+  const missing = Array.isArray(grounding.missing_evidence) ? grounding.missing_evidence : [];
+  return `
+    <div class="answer-grounding">
+      <p><span>问题类型</span>${escapeHtml(grounding.question_type || "--")}</p>
+      <p><span>回答模式</span>${escapeHtml(grounding.answer_mode || "--")}</p>
+      <p><span>需要证据</span>${escapeHtml(grounding.required_evidence || "--")}</p>
+      ${
+        cues.length
+          ? `<p><span>命中信号</span>${cues.map((cue) => `<em class="query-token">${escapeHtml(cue)}</em>`).join(" ")}</p>`
+          : ""
+      }
+      ${
+        missing.length
+          ? `<p><span>缺少证据</span>${missing.map((item) => `<em class="query-token rejected-token">${escapeHtml(item)}</em>`).join(" ")}</p>`
+          : ""
+      }
     </div>
   `;
 }
@@ -305,7 +492,11 @@ async function refreshHealth() {
     const response = await fetch("/health");
     const data = await response.json();
     els.apiStatus.textContent = data.status || "ok";
-    els.collectionName.textContent = data.collection || "legal_rag";
+    const manifestName = data.corpus_manifest ? data.corpus_manifest.split(/[\\/]/).pop() : "";
+    els.collectionName.textContent =
+      data.store_backend === "memory" && manifestName
+        ? `memory / ${manifestName}`
+        : data.collection || "legal_rag";
     document.body.classList.remove("api-offline");
   } catch {
     els.apiStatus.textContent = "offline";
@@ -340,21 +531,36 @@ async function submitQuery() {
   const query = els.questionInput.value.trim();
   if (!query) return;
 
+  const context = collectConversationContext();
   const userMessage = { id: messageId(), role: "user", content: query };
   const assistantId = messageId();
-  state.messages.push(userMessage, { id: assistantId, role: "assistant", loading: true });
+  const answerEnabled = Boolean(els.answerEnabled.checked);
+  state.messages.push(userMessage, {
+    id: assistantId,
+    role: "assistant",
+    loading: true,
+    answer: answerEnabled,
+  });
   els.questionInput.value = "";
   autosizeInput();
   setBusy(true);
   render();
+  scrollPageToLatest("auto");
 
   try {
-    const pack = await postJson("/evidence", {
+    const payload = {
       query,
       top_k: Number(els.topK.value),
       mode: state.mode,
       filters: collectMetadataFilters(),
-    });
+      context,
+    };
+    const endpoint = answerEnabled ? "/answer" : "/evidence";
+    if (answerEnabled) {
+      payload.llm = collectLLMConfig();
+      saveLLMConfig();
+    }
+    const pack = await postJson(endpoint, payload);
     const index = state.messages.findIndex((message) => message.id === assistantId);
     state.messages[index] = { id: assistantId, role: "assistant", pack };
   } catch (error) {
@@ -368,6 +574,34 @@ async function submitQuery() {
   }
 }
 
+function collectConversationContext() {
+  const turns = [];
+  for (const message of state.messages.slice(-10)) {
+    if (message.loading || message.error) continue;
+    if (message.role === "user") {
+      turns.push({ role: "user", content: message.content || "" });
+    } else if (message.role === "assistant" && message.pack) {
+      const answer = message.pack.answer?.answer || "";
+      const query = message.pack.query || "";
+      turns.push({ role: "assistant", content: answer || `检索问题：${query}` });
+    } else if (message.role === "system") {
+      turns.push({ role: "system", content: message.content || "" });
+    }
+  }
+  return turns.slice(-5);
+}
+
+function collectLLMConfig() {
+  return {
+    provider: "openai_compatible",
+    base_url: els.llmBaseUrl.value.trim(),
+    api_key: els.llmApiKey.value.trim() || null,
+    model: els.llmModel.value.trim(),
+    temperature: Number(els.llmTemperature.value || 0.2),
+    max_tokens: Number(els.llmMaxTokens.value || 700),
+  };
+}
+
 function collectMetadataFilters() {
   const filters = {};
   const docType = els.filterDocType.value.trim();
@@ -375,29 +609,64 @@ function collectMetadataFilters() {
   const court = els.filterCourt.value.trim();
   const dateFrom = els.filterDateFrom.value.trim();
   const dateTo = els.filterDateTo.value.trim();
+  const domain = els.filterDomain.value.trim();
+  const product = els.filterProduct.value.trim();
+  const category = els.filterCategory.value.trim();
+  const locale = els.filterLocale.value.trim();
   if (docType) filters.doc_type = docType;
   if (jurisdiction) filters.jurisdiction = jurisdiction;
   if (court) filters.court = court;
   if (dateFrom) filters.date_from = dateFrom;
   if (dateTo) filters.date_to = dateTo;
+  if (domain) filters.domain = domain;
+  if (product) filters.product = product;
+  if (category) filters.category = category;
+  if (locale) filters.locale = locale;
   return filters;
 }
 
-function scrollPageToLatest() {
+function scrollPageToLatest(behavior = "smooth") {
+  scrollChatToBottom(behavior);
+}
+
+function scrollChatToBottom(behavior = "smooth") {
+  const scrollToBottom = () => {
+    updateComposerMetrics();
+    if (els.chatLog && !els.chatLog.hidden) {
+      const top = els.chatLog.scrollHeight;
+      els.chatLog.scrollTo({ top, behavior });
+      if (behavior === "auto") {
+        els.chatLog.scrollTop = top;
+      }
+      return;
+    }
+    window.scrollTo({ top: document.documentElement.scrollHeight, behavior });
+  };
   window.requestAnimationFrame(() => {
-    window.scrollTo({
-      top: document.documentElement.scrollHeight,
-      behavior: "smooth",
-    });
+    scrollToBottom();
+    window.requestAnimationFrame(scrollToBottom);
+    window.setTimeout(scrollToBottom, 80);
   });
 }
 
 function autosizeInput() {
   els.questionInput.style.height = "auto";
   els.questionInput.style.height = `${Math.min(180, els.questionInput.scrollHeight)}px`;
+  updateComposerMetrics();
+}
+
+function updateComposerMetrics() {
+  if (!els.composerShell) return;
+  window.requestAnimationFrame(() => {
+    const composerHeight = Math.ceil(els.composerShell.getBoundingClientRect().height);
+    const space = Math.max(140, composerHeight + 28);
+    document.documentElement.style.setProperty("--composer-space", `${space}px`);
+  });
 }
 
 function initControls() {
+  initLLMControls();
+
   document.querySelectorAll(".segment").forEach((button) => {
     button.addEventListener("click", () => {
       state.mode = button.dataset.mode;
@@ -439,6 +708,45 @@ function initControls() {
     render();
     els.questionInput.focus();
   });
+
+  document.querySelectorAll(".advanced-panel").forEach((panel) => {
+    panel.addEventListener("toggle", updateComposerMetrics);
+  });
+
+  window.addEventListener("resize", updateComposerMetrics);
+}
+
+function initLLMControls() {
+  const config = state.llmConfig;
+  if (
+    (config.preset || "ollama-gemma4") === "ollama-gemma4" &&
+    config.baseUrl === "http://host.docker.internal:11434/v1"
+  ) {
+    config.baseUrl = LLM_PRESETS["ollama-gemma4"].baseUrl;
+  }
+  els.answerEnabled.checked = config.enabled !== false;
+  els.llmPreset.value = config.preset || "ollama-gemma4";
+  applyLLMPreset({ preserveCustom: true });
+  if (config.baseUrl) els.llmBaseUrl.value = config.baseUrl;
+  if (config.model) els.llmModel.value = config.model;
+  if (config.temperature !== undefined) els.llmTemperature.value = config.temperature;
+  if (config.maxTokens !== undefined) els.llmMaxTokens.value = config.maxTokens;
+
+  els.llmPreset.addEventListener("change", () => {
+    applyLLMPreset();
+    saveLLMConfig();
+  });
+  [els.answerEnabled, els.llmBaseUrl, els.llmModel, els.llmTemperature, els.llmMaxTokens].forEach((item) => {
+    item.addEventListener("input", saveLLMConfig);
+    item.addEventListener("change", saveLLMConfig);
+  });
+}
+
+function applyLLMPreset({ preserveCustom = false } = {}) {
+  const preset = LLM_PRESETS[els.llmPreset.value] || LLM_PRESETS.custom;
+  if (preserveCustom && state.llmConfig.baseUrl && state.llmConfig.model) return;
+  els.llmBaseUrl.value = preset.baseUrl;
+  els.llmModel.value = preset.model;
 }
 
 initControls();

@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from dotenv import load_dotenv
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
@@ -18,9 +18,11 @@ class Settings(BaseSettings):
     qdrant_url: str = "http://localhost:6333"
     qdrant_api_key: str | None = None
     qdrant_collection: str = "legal_rag"
+    store_backend: str = "qdrant"
+    corpus_manifest: str = str(ROOT_DIR / "configs" / "legal_sources.yml")
 
     embedding_backend: str = "fastembed"
-    embedding_model: str = "BAAI/bge-large-en-v1.5"
+    embedding_model: str = "BAAI/bge-small-zh-v1.5"
     sparse_model: str = "Qdrant/bm25"
     dense_weight: float = 0.55
     bm25_weight: float = 0.45
@@ -41,11 +43,17 @@ class Settings(BaseSettings):
     query_rewrite_backend: str = "none"
     query_rewrite_base_url: str = "http://localhost:11434"
     query_rewrite_model: str = "gemma4:e2b"
-    query_rewrite_timeout_seconds: float = Field(default=8.0, ge=0.1)
+    query_rewrite_timeout_seconds: float = Field(default=60.0, ge=0.1)
     query_rewrite_max_queries: int = Field(default=4, ge=1, le=10)
     inferred_metadata_filters_enabled: bool = True
     query_rewrite_filter_min_confidence: float = Field(default=0.55, ge=0.0, le=1.0)
     query_extension_min_similarity: float = Field(default=0.45, ge=0.0, le=1.0)
+    intent_router_backend: str = "ollama"
+    intent_router_base_url: str = "http://localhost:11434"
+    intent_router_model: str = "gemma4:e2b"
+    intent_router_timeout_seconds: float = Field(default=60.0, ge=0.1)
+    intent_router_low_confidence_threshold: float = Field(default=0.75, ge=0.0, le=1.0)
+    intent_router_context_turns: int = Field(default=5, ge=0, le=12)
 
     default_top_k: int = Field(default=8, ge=1)
 
@@ -55,6 +63,13 @@ class Settings(BaseSettings):
     trace_include_text: bool = False
     trace_text_chars: int = Field(default=300, ge=0)
     trace_max_items_per_stage: int = Field(default=20, ge=1)
+
+    @field_validator("reranker_model", mode="before")
+    @classmethod
+    def normalize_disabled_reranker(cls, value: object) -> object:
+        if isinstance(value, str) and value.strip().lower() in {"", "none", "null"}:
+            return None
+        return value
 
 
 @dataclass(frozen=True)
@@ -82,4 +97,4 @@ def load_settings(env_file: str | Path | None = None) -> Settings:
 
 def env_reranker_enabled() -> bool:
     value = os.getenv("RERANKER_MODEL", "")
-    return bool(value.strip())
+    return value.strip().lower() not in {"", "none", "null"}

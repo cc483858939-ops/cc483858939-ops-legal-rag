@@ -31,15 +31,15 @@
     <main class="docket-shell" aria-label="Legal RAG evidence assistant">
       <section class="empty-state" id="emptyState" aria-label="Start a retrieval chat">
         <p class="kicker">Evidence-first legal retrieval</p>
-        <h1>今天想查什么法律资料？</h1>
+        <h1>今天想查什么资料？</h1>
         <p class="intro-copy">
-          现在不会生成法律回答，只返回 RAG 检索后的相关文档、片段、引用和排序证据。
+          默认先查个人知识库；未命中时由模型用通用知识回答。关闭生成回答可只看证据包。
         </p>
       </section>
 
       <section class="chat-log" id="chatLog" aria-live="polite" aria-label="Retrieval conversation"></section>
 
-      <section class="composer-shell" aria-label="Ask the legal corpus">
+      <section class="composer-shell" aria-label="Ask the retrieval corpus">
         <form class="prompt-bar" id="queryForm">
           <button class="icon-button" type="button" id="ingestBtn" title="导入默认语料">
             <span aria-hidden="true">
@@ -87,6 +87,10 @@
                 <option value="case">Case</option>
                 <option value="statute">Statute</option>
                 <option value="regulation">Regulation</option>
+                <option value="policy">Policy</option>
+                <option value="guide">Guide</option>
+                <option value="sop">SOP</option>
+                <option value="faq">FAQ</option>
                 <option value="other">Other</option>
               </select>
             </label>
@@ -106,18 +110,81 @@
               <span>结束日期</span>
               <input id="filterDateTo" type="date" />
             </label>
+            <label class="filter-field" for="filterDomain">
+              <span>领域</span>
+              <input id="filterDomain" type="text" placeholder="customer_support" />
+            </label>
+            <label class="filter-field" for="filterProduct">
+              <span>产品</span>
+              <input id="filterProduct" type="text" placeholder="commerce" />
+            </label>
+            <label class="filter-field" for="filterCategory">
+              <span>分类</span>
+              <input id="filterCategory" type="text" placeholder="returns" />
+            </label>
+            <label class="filter-field" for="filterLocale">
+              <span>语言</span>
+              <input id="filterLocale" type="text" placeholder="zh-cn" />
+            </label>
           </div>
         </details>
 
-        <div class="sample-row" aria-label="Sample legal retrieval questions">
-          <button class="sample-chip" type="button" data-sample="What does 5 U.S.C. 553 require for notice?">
-            5 U.S.C. 553 notice
+        <details class="advanced-panel llm-panel">
+          <summary>回答模型</summary>
+          <div class="control-row llm-control-row">
+            <label class="toggle-field" for="answerEnabled">
+              <input id="answerEnabled" type="checkbox" checked />
+              <span>生成回答</span>
+            </label>
+            <label class="filter-field" for="llmPreset">
+              <span>模型预设</span>
+              <select id="llmPreset">
+                <option value="ollama-gemma4">Ollama Gemma 4 E2B</option>
+                <option value="deepseek-chat">DeepSeek Chat</option>
+                <option value="openai-compatible">OpenAI Compatible</option>
+                <option value="openrouter">OpenRouter</option>
+                <option value="siliconflow">SiliconFlow</option>
+                <option value="lmstudio">LM Studio Local</option>
+                <option value="custom">Custom</option>
+              </select>
+            </label>
+          </div>
+          <div class="filter-grid" aria-label="Answer model configuration">
+            <label class="filter-field" for="llmBaseUrl">
+              <span>Base URL</span>
+              <input id="llmBaseUrl" type="text" spellcheck="false" />
+            </label>
+            <label class="filter-field" for="llmModel">
+              <span>Model</span>
+              <input id="llmModel" type="text" spellcheck="false" />
+            </label>
+            <label class="filter-field" for="llmApiKey">
+              <span>API Key</span>
+              <input id="llmApiKey" type="password" autocomplete="off" placeholder="只在本次请求发送" />
+            </label>
+            <label class="filter-field" for="llmTemperature">
+              <span>Temperature</span>
+              <input id="llmTemperature" type="number" min="0" max="2" step="0.1" value="0.2" />
+            </label>
+            <label class="filter-field" for="llmMaxTokens">
+              <span>Max tokens</span>
+              <input id="llmMaxTokens" type="number" min="64" max="4000" step="64" value="700" />
+            </label>
+          </div>
+        </details>
+
+        <div class="sample-row" aria-label="Sample retrieval questions">
+          <button class="sample-chip" type="button" data-sample="退款多久到账">
+            退款多久到账
           </button>
-          <button class="sample-chip" type="button" data-sample="How do Twombly and Iqbal describe plausibility pleading?">
-            Twombly / Iqbal
+          <button class="sample-chip" type="button" data-sample="订单发货后还能改地址吗">
+            发货后改地址
           </button>
-          <button class="sample-chip" type="button" data-sample="辛普森案">
-            辛普森案
+          <button class="sample-chip" type="button" data-sample="两步验证备份码丢了怎么办">
+            2FA 备份码
+          </button>
+          <button class="sample-chip" type="button" data-sample="什么时候会转人工客服">
+            转人工客服
           </button>
         </div>
       </section>

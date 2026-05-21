@@ -25,6 +25,11 @@ def build_evidence_pack(
     trace_retention_count: int | None = None,
     reranker_summary: dict | None = None,
     metadata_filters: MetadataFilterDecision | None = None,
+    route: dict | None = None,
+    intent: str = "answer_question",
+    intent_reason: str = "knowledge_lookup",
+    retrieval_status: str = "retrieved",
+    relevance: dict | None = None,
 ) -> dict:
     rewrite = query_rewrite or QueryRewriteResult.original(query)
     extensions = query_extensions or build_query_extensions(
@@ -32,8 +37,26 @@ def build_evidence_pack(
         embedder=None,
         min_similarity=0.45,
     )
+    route = route or {}
     return {
         "query": query,
+        "intent": route.get("intent", intent),
+        "intent_reason": route.get("intent_reason", intent_reason),
+        "need_retrieval": route.get("need_retrieval", retrieval_status == "retrieved"),
+        "domain": route.get("domain", "unknown"),
+        "query_type": route.get("query_type", "unknown"),
+        "retrieval_strategy": route.get("retrieval_strategy", "hybrid"),
+        "answer_source": route.get("answer_source", "personal_kb"),
+        "kb_required": route.get("kb_required", False),
+        "allow_model_fallback": route.get("allow_model_fallback", False),
+        "requires_clarification": route.get("requires_clarification", False),
+        "clarification_question": route.get("clarification_question"),
+        "intent_confidence": route.get("intent_confidence", 0.0),
+        "intent_source": route.get("intent_source", "fallback"),
+        "intent_priority_reason": route.get("intent_priority_reason", route.get("intent_reason")),
+        "intent_error": route.get("intent_error"),
+        "retrieval_status": retrieval_status,
+        "relevance": relevance or {},
         "retrieval_query": extensions.retrieval_query,
         "query_rewrite": rewrite.as_dict(),
         "query_extensions": extensions.as_dict(),

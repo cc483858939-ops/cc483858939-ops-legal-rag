@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from legal_rag.config import Settings
+from legal_rag.config import Settings, env_reranker_enabled
 from legal_rag.embeddings import HashingEmbedder
 from legal_rag.evidence import retrieve_with_query_extensions_and_summary
 from legal_rag.factory import build_embedder, build_retriever
@@ -11,6 +11,21 @@ from legal_rag.query_rewrite import AcceptedQueryExtension
 from legal_rag.rerank import LexicalReranker, UnavailableReranker, rerank_hits
 from legal_rag.schema import RetrievalHit
 from legal_rag.store import InMemoryLegalStore
+
+
+def test_default_embedding_uses_lightweight_chinese_fastembed() -> None:
+    settings = Settings()
+
+    assert settings.embedding_backend == "fastembed"
+    assert settings.embedding_model == "BAAI/bge-small-zh-v1.5"
+    assert settings.reranker_model is None
+
+
+def test_disabled_reranker_env_values_are_normalized(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("RERANKER_MODEL", "none")
+
+    assert Settings().reranker_model is None
+    assert not env_reranker_enabled()
 
 
 def test_hybrid_retrieval_finds_statute(retriever) -> None:
