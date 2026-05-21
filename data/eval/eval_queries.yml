@@ -1,0 +1,91 @@
+queries:
+  - id: cn-apa-notice-rulemaking
+    query: "行政程序法 通知评论规则制定"
+    expected_citations:
+      - "5 U.S.C. § 553"
+    category: statute_cn
+    tags: ["apa", "rulemaking", "chinese"]
+  - id: cn-apa-review
+    query: "行政机关任意专断 审查 标准"
+    expected_citations:
+      - "5 U.S.C. § 706"
+    category: statute_cn
+    tags: ["apa", "judicial-review", "chinese"]
+  - id: cn-fair-use-factors
+    query: "版权合理使用 四个因素"
+    expected_citations:
+      - "17 U.S.C. § 107"
+    category: statute_cn
+    tags: ["copyright", "fair-use", "chinese"]
+  - id: cn-parody-transformative
+    query: "戏仿 transformative fair use Campbell"
+    expected_citations:
+      - "Campbell v. Acuff-Rose Music, Inc., 510 U.S. 569 (1994)"
+      - "17 U.S.C. § 107"
+    category: cross_document_cn
+    tags: ["copyright", "fair-use", "case", "chinese"]
+  - id: cn-plausibility-pleading
+    query: "起诉标准 合理可信 Twombly Iqbal"
+    expected_citations:
+      - "Bell Atlantic Corp. v. Twombly, 550 U.S. 544 (2007)"
+      - "Ashcroft v. Iqbal, 556 U.S. 662 (2009)"
+    category: cross_document_cn
+    tags: ["pleading", "civil-procedure", "chinese"]
+  - id: cn-cfaa-van-buren
+    query: "电脑欺诈法 未授权访问 CFAA Van Buren"
+    expected_citations:
+      - "18 U.S.C. § 1030"
+      - "Van Buren v. United States, 593 U.S. 374 (2021)"
+    category: cross_document_cn
+    tags: ["cfaa", "computer-access", "chinese"]
+  - id: cn-section-1983-monell
+    query: "1983法案 市政责任 policy custom Monell"
+    expected_citations:
+      - "42 U.S.C. § 1983"
+      - "Monell v. Department of Social Services, 436 U.S. 658 (1978)"
+    category: cross_document_cn
+    tags: ["civil-rights", "municipal-liability", "chinese"]
+  - id: cn-chevron-overruled
+    query: "Chevron 被哪个案子推翻"
+    expected_citations:
+      - "Loper Bright Enterprises v. Raimondo, 603 U.S. 369 (2024)"
+    category: case_cn
+    tags: ["administrative-law", "chevron", "chinese"]
+  - id: cn-marbury-judicial-review
+    query: "司法审查 Marbury"
+    expected_citations:
+      - "Marbury v. Madison, 5 U.S. (1 Cranch) 137 (1803)"
+    category: case_cn
+    tags: ["constitutional-law", "judicial-review", "chinese"]
+  - id: en-federal-question-grable
+    query: "federal question arising under Grable 1331"
+    expected_citations:
+      - "28 U.S.C. § 1331"
+      - "Grable & Sons Metal Products, Inc. v. Darue Engineering, 545 U.S. 308 (2005)"
+    category: cross_document_en
+    tags: ["jurisdiction", "federal-question"]
+  - id: en-chenery-camp-record
+    query: "agency review grounds invoked administrative record"
+    expected_citations:
+      - "SEC v. Chenery Corp., 318 U.S. 80 (1943)"
+      - "Camp v. Pitts, 411 U.S. 138 (1973)"
+    category: cross_document_en
+    tags: ["administrative-law", "judicial-review"]
+  - id: en-mathews-due-process
+    query: "Mathews due process balancing private interest risk erroneous deprivation"
+    expected_citations:
+      - "Mathews v. Eldridge, 424 U.S. 319 (1976)"
+    category: case_en
+    tags: ["due-process"]
+  - id: en-false-statements
+    query: "material false statements federal jurisdiction 1001"
+    expected_citations:
+      - "18 U.S.C. § 1001"
+    category: statute_en
+    tags: ["criminal-law", "false-statements"]
+  - id: cn-diversity-jurisdiction
+    query: "多元管辖 diversity jurisdiction amount in controversy"
+    expected_citations:
+      - "28 U.S.C. § 1332"
+    category: statute_cn
+    tags: ["jurisdiction", "diversity", "chinese"]

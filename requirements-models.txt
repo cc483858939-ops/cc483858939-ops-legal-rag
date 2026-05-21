@@ -1,0 +1,2 @@
+# Optional heavy extras for cross-encoder rerankers or sentence-transformers embedding backend.
+sentence-transformers>=3.0

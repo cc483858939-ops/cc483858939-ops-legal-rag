@@ -1,0 +1,4 @@
+Section 706. Scope of review.
+To the extent necessary to decision and when presented, the reviewing court shall decide all relevant questions of law, interpret constitutional and statutory provisions, and determine the meaning or applicability of the terms of an agency action.
+The reviewing court shall hold unlawful and set aside agency action, findings, and conclusions found to be arbitrary, capricious, an abuse of discretion, or otherwise not in accordance with law.
+The court shall also set aside agency action contrary to constitutional right, in excess of statutory jurisdiction, without observance of procedure required by law, or unsupported by substantial evidence where applicable.
