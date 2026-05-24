@@ -13,7 +13,7 @@ from legal_rag.text import chunk_text, normalize_whitespace, stable_id
 def load_source(
     item: SourceItem,
     *,
-    max_words: int = 220,
+    max_words: int = 300,
     overlap_words: int = 40,
 ) -> list[DocumentChunk]:
     if not item.path:
@@ -35,7 +35,7 @@ def build_chunks(
     item: SourceItem,
     text: str,
     *,
-    max_words: int = 220,
+    max_words: int = 300,
     overlap_words: int = 40,
 ) -> list[DocumentChunk]:
     parsed_date = date.fromisoformat(item.date) if item.date else None

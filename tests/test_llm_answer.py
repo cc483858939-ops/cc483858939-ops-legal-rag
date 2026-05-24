@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 from legal_rag.llm_answer import (
+    AnswerabilityGate,
     GeneralKnowledgeAnswerer,
     LLMAnswerConfig,
     OpenAICompatibleAnswerer,
+    classify_question_type,
     extract_query_terms,
 )
 from legal_rag.schema import RetrievalHit
@@ -69,6 +71,63 @@ def test_openai_compatible_answerer_posts_grounded_prompt(monkeypatch) -> None:
 def test_extract_query_terms_removes_chinese_factual_question_cue() -> None:
     assert extract_query_terms("炫神是谁") == ["炫神"]
     assert extract_query_terms("高斯是谁") == ["高斯"]
+
+
+def test_extract_query_terms_splits_personal_kb_relation_queries() -> None:
+    assert extract_query_terms("炫神的父亲有哪些") == ["炫神", "父亲"]
+    assert extract_query_terms("大司马和炫神是什么关系") == ["大司马", "炫神"]
+    assert extract_query_terms("我的笔记里炫神是谁") == ["炫神"]
+    assert extract_query_terms("那他是谁") == []
+
+
+def test_default_answerability_allows_grounded_definition_factual_and_other_questions() -> None:
+    hit = RetrievalHit(
+        chunk_id="personal-1",
+        source_id="personal-test-note",
+        doc_type="note",
+        title="Personal Test Note",
+        citation="Personal Test Note v1",
+        jurisdiction="PERSONAL",
+        text=(
+            "炫神最喜欢的歌是打火机，因为其中的一句歌词是 吉隆坡的天气，他是翻云又覆雨。"
+            "炫神，又被称为炫狗。电棍是他的兄弟。"
+            "长期事实记忆适合保存稳定偏好。短期会话记忆用于维持当前对话上下文。"
+        ),
+        fusion_score=0.1,
+    )
+    cases = [
+        ("打火机歌词是什么", "definition"),
+        ("吉隆坡天气那句歌词后面是什么", "definition"),
+        ("炫神最爱的歌叫啥", "definition"),
+        ("炫神别名是什么", "definition"),
+        ("电棍跟炫神什么关系", "factual"),
+        ("炫神最孝顺谁", "factual"),
+        ("用户稳定偏好应该记到哪里", "factual"),
+        ("当前对话上下文靠哪种记忆维持", "factual"),
+        ("个人知识库助手比智能客服多做什么", "other"),
+    ]
+
+    gate = AnswerabilityGate()
+    for question, question_type in cases:
+        result = gate.evaluate(question, [hit])
+
+        assert result.question_type == question_type
+        assert result.answerable is True
+        assert result.answer_mode == "direct"
+        assert result.answer_status == "answered"
+        assert result.missing_evidence == []
+        assert result.reason is None
+
+
+def test_location_classification_cues_take_precedence_over_causal_reason_cue() -> None:
+    assert classify_question_type("工具调用失败原因和调试路径应该放哪") == "factual"
+    assert classify_question_type("用户稳定偏好应该记到哪里") == "factual"
+    assert classify_question_type("当前对话上下文靠哪种记忆维持") == "factual"
+
+
+def test_true_causal_questions_still_classify_as_causal() -> None:
+    assert classify_question_type("数据丢失的原因是什么") == "causal"
+    assert classify_question_type("他为啥喜欢打火机") == "causal"
 
 
 def test_openai_compatible_answerer_skips_without_evidence() -> None:
@@ -158,7 +217,7 @@ def test_general_knowledge_answerer_prefixes_personal_kb_fallback(monkeypatch) -
         )
     ).generate("高斯是谁", fallback_from_kb=True)
 
-    assert result["answer"].startswith("个人知识库没有找到直接相关内容；按通用知识，")
+    assert result["answer"].startswith("个人知识库没有找到直接相关内容；根据一般常识，")
     assert result["answer_status"] == "model_fallback"
     assert result["reason"] == "kb_no_relevant_evidence"
     assert result["citations"] == []

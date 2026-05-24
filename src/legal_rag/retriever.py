@@ -91,7 +91,13 @@ class HybridRetriever:
             stage = (
                 trace.start_stage(
                     "bm25_search",
-                    {"query": query, "top_k": pool, **filter_trace, **context},
+                    {
+                        "query": query,
+                        "top_k": pool,
+                        "sparse_backend": getattr(self.store, "sparse_backend", "in_memory"),
+                        **filter_trace,
+                        **context,
+                    },
                 )
                 if trace
                 else None

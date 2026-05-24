@@ -194,3 +194,15 @@ sources:
     court: Supreme Court
     date: "2005-06-13"
     path: ../tests/fixtures/case_grable.txt
+  - source_id: personal-test-note
+    doc_type: note
+    title: Personal Test Note
+    citation: Personal Test Note v1, Section personal-test
+    jurisdiction: PERSONAL
+    date: "2026-05-19"
+    section: personal-test
+    path: ../data/corpus/personal_test/my_note.txt
+    metadata:
+      domain: personal_kb
+      topic: personal_test
+      language: zh

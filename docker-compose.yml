@@ -22,6 +22,7 @@ services:
       CORPUS_MANIFEST: ${CORPUS_MANIFEST:-/app/configs/legal_sources.yml}
       EMBEDDING_BACKEND: ${EMBEDDING_BACKEND:-fastembed}
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-BAAI/bge-small-zh-v1.5}
+      SPARSE_BACKEND: ${SPARSE_BACKEND:-bm25_jieba}
       SPARSE_MODEL: ${SPARSE_MODEL:-Qdrant/bm25}
       RERANKER_MODEL: "${RERANKER_MODEL:-}"
       RERANKER_ONNX_FILE: ${RERANKER_ONNX_FILE:-onnx/model_quint8_avx2.onnx}
@@ -74,6 +75,7 @@ services:
       CORPUS_MANIFEST: ${CORPUS_MANIFEST:-/app/configs/legal_sources.yml}
       EMBEDDING_BACKEND: ${EMBEDDING_BACKEND:-fastembed}
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-BAAI/bge-small-zh-v1.5}
+      SPARSE_BACKEND: ${SPARSE_BACKEND:-bm25_jieba}
       SPARSE_MODEL: ${SPARSE_MODEL:-Qdrant/bm25}
       RERANKER_MODEL: "${RERANKER_MODEL:-}"
       RERANKER_ONNX_FILE: ${RERANKER_ONNX_FILE:-onnx/model_quint8_avx2.onnx}
@@ -119,6 +121,7 @@ services:
       QDRANT_URL: http://qdrant:6333
       STORE_BACKEND: qdrant
       CORPUS_MANIFEST: /app/configs/legal_sources.yml
+      SPARSE_BACKEND: bm25_jieba
       RERANKER_MODEL: ""
       INTENT_ROUTER_BACKEND: none
       QUERY_REWRITE_BACKEND: none

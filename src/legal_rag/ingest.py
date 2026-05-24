@@ -11,7 +11,7 @@ from legal_rag.store import LegalVectorStore
 def load_chunks_from_manifest(
     manifest_path: str | Path,
     *,
-    max_words: int = 220,
+    max_words: int = 300,
     overlap_words: int = 40,
 ) -> list[DocumentChunk]:
     chunks: list[DocumentChunk] = []
@@ -24,7 +24,7 @@ def ingest_manifest(
     manifest_path: str | Path,
     store: LegalVectorStore,
     *,
-    max_words: int = 220,
+    max_words: int = 300,
     overlap_words: int = 40,
 ) -> list[DocumentChunk]:
     chunks = load_chunks_from_manifest(

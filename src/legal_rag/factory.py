@@ -35,6 +35,7 @@ def build_store(settings: Settings, *, offline: bool = False):
         api_key=settings.qdrant_api_key,
         collection_name=settings.qdrant_collection,
         embedder=embedder,
+        sparse_backend=settings.sparse_backend,
         sparse_model=settings.sparse_model,
     )
 

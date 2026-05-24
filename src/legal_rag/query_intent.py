@@ -26,10 +26,13 @@ QUERY_TYPE_VALUES = (
     "list",
     "comparison",
     "procedural",
+    "definition",
+    "summary",
     "exact",
     "troubleshooting",
     "preference",
     "statement",
+    "other",
     "unknown",
 )
 RETRIEVAL_STRATEGY_VALUES = ("hybrid", "dense", "bm25", "hybrid_with_rerank", "none")
@@ -52,15 +55,19 @@ QueryType = Literal[
     "list",
     "comparison",
     "procedural",
+    "definition",
+    "summary",
     "exact",
     "troubleshooting",
     "preference",
     "statement",
+    "other",
     "unknown",
 ]
 RetrievalStrategy = Literal["hybrid", "dense", "bm25", "hybrid_with_rerank", "none"]
 AnswerSource = Literal["personal_kb", "model", "none"]
 IntentSource = Literal["llm", "rule", "fallback"]
+QueryCategory = Literal["direct_model", "kb_first", "kb_only"]
 
 LOW_CONFIDENCE_THRESHOLD = 0.75
 RAG_INTENTS = {"answer_question", "unclear"}
@@ -84,6 +91,25 @@ STRICT_PERSONAL_KB_CUES = (
     "根据我的笔记",
     "根据我的文档",
     "根据知识库",
+    "上传的资料",
+    "上传的文档",
+    "上传的文件",
+    "导入的文件",
+    "我的文件",
+    "my knowledge base",
+    "my kb",
+    "my notes",
+    "my docs",
+    "my documents",
+    "my files",
+    "uploaded documents",
+    "uploaded files",
+    "uploaded notes",
+    "according to my notes",
+    "according to my docs",
+    "according to my documents",
+    "in my notes",
+    "in my documents",
 )
 EXPLICIT_GENERAL_MODEL_CUES = (
     "根据你的训练知识",
@@ -91,17 +117,40 @@ EXPLICIT_GENERAL_MODEL_CUES = (
     "按你的训练知识",
     "根据通用知识",
     "按通用知识",
-    "不用查",
-    "不要查",
-    "别查",
-    "不要检索",
-    "别检索",
-    "不要查库",
-    "不查库",
 )
-TRANSLATION_CUES = ("翻译", "translate", "translation")
 MEMORY_WRITE_CUES = ("记住", "保存", "加入知识库", "写进知识库", "记录一下", "记一下")
+DIRECT_MODEL_CUES = (
+    "改写",
+    "润色",
+    "改成",
+    "重写",
+    "缩写",
+    "扩写",
+    "帮我写",
+    "写一篇",
+    "写一首",
+    "写一段",
+    "编一个",
+    "写代码",
+    "写程序",
+    "代码实现",
+    "实现一个",
+    "解方程",
+    "求导",
+    "积分",
+    "证明",
+    "rewrite",
+    "rephrase",
+    "write me",
+    "compose",
+    "code",
+    "program",
+    "solve",
+)
 KNOWLEDGE_STYLE_CUES = (
+    "叫啥",
+    "什么关系",
+    "啥关系",
     "谁",
     "什么",
     "是谁",
@@ -151,7 +200,12 @@ Examples:
 - "高斯是谁" -> answer_source=personal_kb, need_retrieval=true, kb_required=false, allow_model_fallback=true.
 - "我的笔记里高斯是谁" -> answer_source=personal_kb, need_retrieval=true, kb_required=true, allow_model_fallback=false.
 - "1+1等于几" -> answer_source=model, out_of_scope, general_chat, exact, need_retrieval=false, retrieval_strategy=none, confidence=0.95.
+- "请翻译一下 hello world" -> answer_source=model, need_retrieval=false, retrieval_strategy=none, confidence=0.95.
+- "帮我写一首关于春天的诗" -> answer_source=model, need_retrieval=false, retrieval_strategy=none, confidence=0.95.
+- "3x+5=20 求x" -> answer_source=model, need_retrieval=false, retrieval_strategy=none, confidence=0.95.
 - "根据你的训练知识回答我，心肺复苏的基本流程" -> answer_source=model, out_of_scope, general_chat, procedural, need_retrieval=false, retrieval_strategy=none, confidence=0.9.
+- "什么是递归" -> answer_source=personal_kb, need_retrieval=true, kb_required=false, allow_model_fallback=true.
+- "解释一下牛顿第三定律" -> answer_source=personal_kb, need_retrieval=true, kb_required=false, allow_model_fallback=true.
 - "炫神是谁" -> answer_source=personal_kb, need_retrieval=true, kb_required=false, allow_model_fallback=true.
 - "我最喜欢什么颜色" asks about stored personal knowledge and should retrieve with kb_required=false.
 - "我最喜欢蓝色" is a memory_candidate and should not retrieve automatically.
@@ -405,100 +459,15 @@ def normalize_route_decision(
     ):
         return fallback_route("router_error", error="clarification_question_required")
 
-    if _should_force_strict_personal_kb(query, decision):
-        strategy = _retrieval_strategy_or_default(decision.retrieval_strategy, reranker_enabled)
-        return QueryIntentResult(
-            need_retrieval=True,
-            intent=decision.intent if decision.intent in RAG_INTENTS else "answer_question",
-            domain="personal_kb",
-            query_type=decision.query_type,
-            retrieval_strategy=strategy,
-            answer_source="personal_kb",
-            kb_required=True,
-            allow_model_fallback=False,
-            requires_clarification=False,
-            clarification_question=None,
-            confidence=decision.confidence,
-            source="llm",
-            priority_reason="strict_personal_kb",
-        )
+    category = _classify_query_category(
+        query,
+        decision,
+        low_confidence_threshold=low_confidence_threshold,
+    )
 
-    if _should_force_model_answer(query, decision):
-        return QueryIntentResult(
-            need_retrieval=False,
-            intent="answer_question",
-            domain="general_chat",
-            query_type=decision.query_type,
-            retrieval_strategy="none",
-            answer_source="model",
-            kb_required=False,
-            allow_model_fallback=False,
-            requires_clarification=False,
-            clarification_question=None,
-            confidence=decision.confidence,
-            source="llm",
-            priority_reason="direct_model_rule",
-        )
-
-    if _should_force_personal_kb_first(query, decision):
-        strategy = _retrieval_strategy_or_default(decision.retrieval_strategy, reranker_enabled)
-        return QueryIntentResult(
-            need_retrieval=True,
-            intent=decision.intent if decision.intent in RAG_INTENTS else "answer_question",
-            domain="personal_kb",
-            query_type=decision.query_type,
-            retrieval_strategy=strategy,
-            answer_source="personal_kb",
-            kb_required=False,
-            allow_model_fallback=True,
-            requires_clarification=False,
-            clarification_question=None,
-            confidence=decision.confidence,
-            source="llm",
-            priority_reason="personal_kb_first",
-        )
-
-    if (
-        decision.confidence < low_confidence_threshold
-        and not decision.need_retrieval
-        and not _is_obvious_direct_model_query(normalize_whitespace(query).casefold())
+    if decision.requires_clarification and (
+        category == "direct_model" or _is_ambiguous_reference_query(query)
     ):
-        strategy = _retrieval_strategy_or_default(decision.retrieval_strategy, reranker_enabled)
-        return QueryIntentResult(
-            need_retrieval=True,
-            intent=decision.intent if decision.intent in RAG_INTENTS else "answer_question",
-            domain="personal_kb",
-            query_type=decision.query_type,
-            retrieval_strategy=strategy,
-            answer_source="personal_kb",
-            kb_required=False,
-            allow_model_fallback=True,
-            requires_clarification=False,
-            clarification_question=None,
-            confidence=decision.confidence,
-            source="llm",
-            priority_reason="low_confidence",
-        )
-
-    if decision.confidence < low_confidence_threshold:
-        strategy = _retrieval_strategy_or_default(decision.retrieval_strategy, reranker_enabled)
-        return QueryIntentResult(
-            need_retrieval=True,
-            intent=decision.intent if decision.intent in RAG_INTENTS else "unclear",
-            domain=decision.domain,
-            query_type=decision.query_type,
-            retrieval_strategy=strategy,
-            answer_source="personal_kb",
-            kb_required=False,
-            allow_model_fallback=True,
-            requires_clarification=False,
-            clarification_question=None,
-            confidence=decision.confidence,
-            source="llm",
-            priority_reason="low_confidence",
-        )
-
-    if decision.requires_clarification:
         return QueryIntentResult(
             need_retrieval=False,
             intent=decision.intent,
@@ -515,11 +484,24 @@ def normalize_route_decision(
             priority_reason="clarification",
         )
 
-    if _is_model_answer_decision(decision):
+    return _route_result_for_category(
+        category,
+        decision,
+        reranker_enabled=reranker_enabled,
+    )
+
+
+def _route_result_for_category(
+    category: QueryCategory,
+    decision: RouteDecision,
+    *,
+    reranker_enabled: bool,
+) -> QueryIntentResult:
+    if category == "direct_model":
         return QueryIntentResult(
             need_retrieval=False,
-            intent=decision.intent,
-            domain=decision.domain,
+            intent="answer_question",
+            domain="general_chat",
             query_type=decision.query_type,
             retrieval_strategy="none",
             answer_source="model",
@@ -529,37 +511,15 @@ def normalize_route_decision(
             clarification_question=None,
             confidence=decision.confidence,
             source="llm",
-            priority_reason="model",
+            priority_reason="direct_model",
         )
 
-    if decision.intent in NON_RAG_INTENTS or (
-        decision.intent != "answer_question"
-        and (not decision.need_retrieval or decision.retrieval_strategy == "none")
-    ):
-        intent = _non_rag_intent_or_default(decision)
-        answer_source = _answer_source_for_non_rag(intent, decision)
-        return QueryIntentResult(
-            need_retrieval=False,
-            intent=intent,
-            domain=decision.domain,
-            query_type=decision.query_type,
-            retrieval_strategy="none",
-            answer_source=answer_source,
-            kb_required=False,
-            allow_model_fallback=False,
-            requires_clarification=False,
-            clarification_question=None,
-            confidence=decision.confidence,
-            source="llm",
-            priority_reason="non_rag_intent",
-        )
-
+    kb_required = category == "kb_only"
     strategy = _retrieval_strategy_or_default(decision.retrieval_strategy, reranker_enabled)
-    kb_required = _normalized_kb_required(query, decision)
     return QueryIntentResult(
         need_retrieval=True,
-        intent=decision.intent if decision.intent in RAG_INTENTS else "unclear",
-        domain=decision.domain,
+        intent=_kb_intent(decision),
+        domain="personal_kb",
         query_type=decision.query_type,
         retrieval_strategy=strategy,
         answer_source="personal_kb",
@@ -569,7 +529,7 @@ def normalize_route_decision(
         clarification_question=None,
         confidence=decision.confidence,
         source="llm",
-        priority_reason="rag",
+        priority_reason=category,
     )
 
 
@@ -663,12 +623,54 @@ def _retrieval_strategy_or_default(
     return strategy
 
 
-def _non_rag_intent_or_default(decision: RouteDecision) -> Intent:
-    if decision.intent in NON_RAG_INTENTS:
+def _classify_query_category(
+    query: str,
+    decision: RouteDecision,
+    *,
+    low_confidence_threshold: float,
+) -> QueryCategory:
+    text = normalize_whitespace(query).casefold()
+    if _normalized_kb_required(query, decision):
+        return "kb_only"
+    if not text:
+        if decision.need_retrieval or decision.confidence < low_confidence_threshold:
+            return "kb_first"
+        return "direct_model"
+    if _is_obvious_direct_model_query(text):
+        return "direct_model"
+    if _is_direct_model_task(text):
+        return "direct_model"
+    if _looks_like_question(text) or _is_knowledge_style_query(text, decision):
+        return "kb_first"
+    if decision.confidence < low_confidence_threshold and not decision.need_retrieval:
+        return "kb_first"
+    if _looks_like_memory_statement(text, decision):
+        return "direct_model"
+    if _is_model_answer_decision(decision):
+        return "direct_model"
+    if decision.intent in NON_RAG_INTENTS or (
+        decision.intent != "answer_question"
+        and (not decision.need_retrieval or decision.retrieval_strategy == "none")
+    ):
+        return "direct_model"
+    if decision.need_retrieval or decision.answer_source == "personal_kb":
+        return "kb_first"
+    return "direct_model"
+
+
+def _kb_intent(decision: RouteDecision) -> Intent:
+    if decision.intent in RAG_INTENTS:
         return decision.intent
-    if decision.query_type == "statement" or decision.domain == "general_chat":
-        return "casual_chat"
-    return "out_of_scope"
+    if decision.intent == "out_of_scope":
+        return "unclear"
+    return "answer_question"
+
+
+def _is_ambiguous_reference_query(query: str) -> bool:
+    text = normalize_whitespace(query).casefold()
+    if not text:
+        return True
+    return bool(re.search(r"^(那|这)?(他|她|它|这个|那个|这人|那人)", text))
 
 
 def _is_model_answer_decision(decision: RouteDecision) -> bool:
@@ -680,21 +682,6 @@ def _is_model_answer_decision(decision: RouteDecision) -> bool:
     )
 
 
-def _should_force_model_answer(query: str, decision: RouteDecision) -> bool:
-    text = normalize_whitespace(query).casefold()
-    if not text or decision.kb_required or decision.requires_clarification:
-        return False
-    if _is_model_answer_decision(decision):
-        return False
-    if not _is_obvious_direct_model_query(text):
-        return False
-    return True
-
-
-def _should_force_strict_personal_kb(query: str, decision: RouteDecision) -> bool:
-    return _normalized_kb_required(query, decision)
-
-
 def _normalized_kb_required(query: str, decision: RouteDecision) -> bool:
     text = normalize_whitespace(query).casefold()
     if not text:
@@ -702,33 +689,30 @@ def _normalized_kb_required(query: str, decision: RouteDecision) -> bool:
     return any(cue.casefold() in text for cue in STRICT_PERSONAL_KB_CUES)
 
 
-def _should_force_personal_kb_first(query: str, decision: RouteDecision) -> bool:
-    text = normalize_whitespace(query).casefold()
-    if not text:
-        return False
-    if _is_obvious_direct_model_query(text):
-        return False
-    if (
-        decision.need_retrieval
-        and decision.answer_source == "personal_kb"
-        and decision.intent not in NON_RAG_INTENTS
-    ):
-        return False
-    if decision.intent in {"assistant_meta", "command"}:
-        return False
-    if _looks_like_memory_statement(text, decision):
-        return False
-    return _is_knowledge_style_query(text, decision)
-
-
 def _is_obvious_direct_model_query(text: str) -> bool:
     if any(cue.casefold() in text for cue in EXPLICIT_GENERAL_MODEL_CUES):
         return True
-    if any(cue.casefold() in text for cue in TRANSLATION_CUES):
+    if _is_translation_request(text):
         return True
-    if re.fullmatch(r"[\s\d+\-*/÷×().=＝?？]+", text):
+    if re.fullmatch(r"[\s\d+\-*/÷×().=＝?？]+", text) and re.search(r"\d", text):
         return True
     if re.search(r"\d+\s*[+\-*/÷×]\s*\d+", text) and any(cue in text for cue in ("等于", "多少", "?")):
+        return True
+    return False
+
+
+def _is_direct_model_task(text: str) -> bool:
+    return any(cue.casefold() in text for cue in DIRECT_MODEL_CUES)
+
+
+def _is_translation_request(text: str) -> bool:
+    if re.search(r"(翻译成|翻译为|译成|译为)", text):
+        return True
+    if re.match(r"^(请)?(帮我)?翻译(一下|下|[:：\s]|$)", text):
+        return True
+    if re.search(r"\btranslate\b", text):
+        return True
+    if re.search(r"\btranslation\b", text):
         return True
     return False
 
@@ -761,14 +745,10 @@ def _looks_like_memory_statement(text: str, decision: RouteDecision) -> bool:
 
 
 def _looks_like_question(text: str) -> bool:
+    if re.fullmatch(r"[?？\s]+", text):
+        return False
     if "?" in text or "？" in text:
         return True
     if any(cue.casefold() in text for cue in KNOWLEDGE_STYLE_CUES):
         return True
     return bool(re.search(r"\b(who|what|why|how|where|when)\b", text))
-
-
-def _answer_source_for_non_rag(intent: Intent, decision: RouteDecision) -> AnswerSource:
-    if decision.answer_source == "model" and intent in {"answer_question", "casual_chat", "out_of_scope"}:
-        return "model"
-    return "none"

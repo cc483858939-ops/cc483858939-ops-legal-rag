@@ -3,14 +3,15 @@ from __future__ import annotations
 import math
 from collections import Counter
 from dataclasses import dataclass, field
+from typing import Any
 
 from legal_rag.schema import DocumentChunk
-from legal_rag.text import tokenize
+from legal_rag.text import CJK_RE, tokenize
 
 
 @dataclass
 class BM25Index:
-    """Small in-memory BM25 used for tests and local fallback."""
+    """Small in-memory BM25 with a jieba-backed path for Chinese queries."""
 
     k1: float = 1.5
     b: float = 0.75
@@ -19,9 +20,22 @@ class BM25Index:
     doc_freqs: Counter[str] = field(default_factory=Counter)
     doc_lengths: list[int] = field(default_factory=list)
     avg_doc_length: float = 0.0
+    jieba_index: Any | None = field(default=None, init=False, repr=False)
+    jieba_available: bool = field(default=False, init=False)
 
     def fit(self, chunks: list[DocumentChunk]) -> None:
         self.chunks = list(chunks)
+        self._fit_python_bm25(self.chunks)
+        self._fit_jieba_bm25(self.chunks)
+
+    def search(self, query: str, *, top_k: int) -> list[tuple[DocumentChunk, float]]:
+        if _contains_cjk(query):
+            jieba_results = self._search_jieba(query, top_k=top_k)
+            if jieba_results:
+                return jieba_results
+        return self._search_python(query, top_k=top_k)
+
+    def _fit_python_bm25(self, chunks: list[DocumentChunk]) -> None:
         self.term_freqs = []
         self.doc_freqs = Counter()
         self.doc_lengths = []
@@ -37,7 +51,37 @@ class BM25Index:
         total_length = sum(self.doc_lengths)
         self.avg_doc_length = total_length / len(self.doc_lengths) if self.doc_lengths else 0.0
 
-    def search(self, query: str, *, top_k: int) -> list[tuple[DocumentChunk, float]]:
+    def _fit_jieba_bm25(self, chunks: list[DocumentChunk]) -> None:
+        self.jieba_index = None
+        self.jieba_available = False
+        if not chunks:
+            return
+        try:
+            from bm25_jieba import BM25
+        except ImportError:
+            return
+
+        index = BM25(k1=self.k1, b=self.b, lowercase=True)
+        index.fit([chunk.text for chunk in chunks], ids=list(range(len(chunks))))
+        self.jieba_index = index
+        self.jieba_available = True
+
+    def _search_jieba(self, query: str, *, top_k: int) -> list[tuple[DocumentChunk, float]]:
+        if self.jieba_index is None or not self.chunks:
+            return []
+        results = self.jieba_index.search(query, top_k=top_k)
+        scored: list[tuple[DocumentChunk, float]] = []
+        for doc_id, score in results:
+            try:
+                index = int(doc_id)
+                value = float(score)
+            except (TypeError, ValueError):
+                continue
+            if 0 <= index < len(self.chunks) and value > 0:
+                scored.append((self.chunks[index], value))
+        return scored[:top_k]
+
+    def _search_python(self, query: str, *, top_k: int) -> list[tuple[DocumentChunk, float]]:
         query_terms = tokenize(query)
         if not query_terms or not self.chunks:
             return []
@@ -64,3 +108,7 @@ class BM25Index:
             denom = tf + self.k1 * (1 - self.b + self.b * doc_len / max(self.avg_doc_length, 1))
             score += idf * (tf * (self.k1 + 1) / denom)
         return score
+
+
+def _contains_cjk(text: str) -> bool:
+    return bool(CJK_RE.search(text))
