@@ -38,6 +38,7 @@ def test_route_schema_is_json_schema_object() -> None:
     assert isinstance(schema, dict)
     assert schema["type"] == "object"
     assert "need_retrieval" in schema["properties"]
+    assert {"definition", "summary", "other"} <= set(schema["properties"]["query_type"]["enum"])
     assert set(schema["required"]) == {
         "need_retrieval",
         "intent",
@@ -86,6 +87,28 @@ def test_parse_route_decision_validates_schema() -> None:
     assert parsed.query_type == "evaluative"
 
 
+def test_route_decision_accepts_answer_question_type_values() -> None:
+    for query_type in ("definition", "summary", "other"):
+        parsed = parse_route_decision(
+            json.dumps(
+                {
+                    "need_retrieval": True,
+                    "intent": "answer_question",
+                    "domain": "personal_kb",
+                    "query_type": query_type,
+                    "retrieval_strategy": "hybrid",
+                    "answer_source": "personal_kb",
+                    "kb_required": False,
+                    "allow_model_fallback": True,
+                    "requires_clarification": False,
+                    "clarification_question": None,
+                    "confidence": 0.86,
+                }
+            )
+        )
+        assert parsed.query_type == query_type
+
+
 def test_bad_json_and_bad_schema_are_rejected() -> None:
     for content in ["not json", '{"intent":"answer_question"}', '{"intent":"hack","confidence":2}']:
         try:
@@ -109,7 +132,7 @@ def test_low_confidence_forces_rag_even_when_model_says_no_retrieval() -> None:
     )
 
     assert result.need_retrieval is True
-    assert result.priority_reason == "low_confidence"
+    assert result.priority_reason == "kb_first"
     assert result.retrieval_strategy == "hybrid"
     assert result.answer_source == "personal_kb"
     assert result.allow_model_fallback is True
@@ -135,7 +158,30 @@ def test_low_confidence_model_answer_is_overridden_to_personal_kb() -> None:
     assert result.need_retrieval is True
     assert result.answer_source == "personal_kb"
     assert result.allow_model_fallback is True
-    assert result.priority_reason == "low_confidence"
+    assert result.priority_reason == "kb_first"
+
+
+def test_low_confidence_retrieval_decision_keeps_retrieval_enabled() -> None:
+    result = normalize_route_decision(
+        decision(
+            need_retrieval=True,
+            intent="out_of_scope",
+            domain="general_chat",
+            query_type="unknown",
+            retrieval_strategy="none",
+            answer_source="none",
+            kb_required=False,
+            allow_model_fallback=False,
+            confidence=0.55,
+        ),
+        reranker_enabled=False,
+    )
+
+    assert result.need_retrieval is True
+    assert result.intent == "unclear"
+    assert result.retrieval_strategy == "hybrid"
+    assert result.answer_source == "personal_kb"
+    assert result.priority_reason == "kb_first"
 
 
 def test_general_knowledge_answer_question_can_skip_retrieval() -> None:
@@ -157,7 +203,94 @@ def test_general_knowledge_answer_question_can_skip_retrieval() -> None:
 
     assert result.need_retrieval is False
     assert result.answer_source == "model"
-    assert result.priority_reason == "model"
+    assert result.priority_reason == "direct_model"
+
+
+def test_translation_person_lookup_is_not_forced_to_model() -> None:
+    result = normalize_route_decision(
+        decision(
+            need_retrieval=False,
+            intent="answer_question",
+            domain="general_chat",
+            query_type="factual",
+            retrieval_strategy="none",
+            answer_source="model",
+            kb_required=False,
+            allow_model_fallback=False,
+            confidence=0.95,
+        ),
+        reranker_enabled=False,
+        query="翻译家是谁",
+    )
+
+    assert result.need_retrieval is True
+    assert result.answer_source == "personal_kb"
+    assert result.priority_reason == "kb_first"
+
+
+def test_translation_request_can_skip_retrieval() -> None:
+    result = normalize_route_decision(
+        decision(
+            need_retrieval=True,
+            intent="answer_question",
+            domain="personal_kb",
+            query_type="procedural",
+            retrieval_strategy="hybrid",
+            answer_source="personal_kb",
+            kb_required=False,
+            allow_model_fallback=True,
+            confidence=0.9,
+        ),
+        reranker_enabled=False,
+        query="请翻译一下 hello world",
+    )
+
+    assert result.need_retrieval is False
+    assert result.answer_source == "model"
+    assert result.priority_reason == "direct_model"
+
+
+def test_user_skip_retrieval_instruction_does_not_override_kb_first() -> None:
+    result = normalize_route_decision(
+        decision(
+            need_retrieval=False,
+            intent="answer_question",
+            domain="general_chat",
+            query_type="factual",
+            retrieval_strategy="none",
+            answer_source="model",
+            kb_required=False,
+            allow_model_fallback=False,
+            confidence=0.95,
+        ),
+        reranker_enabled=False,
+        query="不要检索，高斯是谁",
+    )
+
+    assert result.need_retrieval is True
+    assert result.answer_source == "personal_kb"
+    assert result.priority_reason == "kb_first"
+
+
+def test_question_mark_only_is_not_arithmetic_direct_model() -> None:
+    result = normalize_route_decision(
+        decision(
+            need_retrieval=False,
+            intent="casual_chat",
+            domain="general_chat",
+            query_type="unknown",
+            retrieval_strategy="none",
+            answer_source="none",
+            kb_required=False,
+            allow_model_fallback=False,
+            confidence=0.95,
+        ),
+        reranker_enabled=False,
+        query="？",
+    )
+
+    assert result.need_retrieval is False
+    assert result.priority_reason == "direct_model"
 
 
 def test_knowledge_style_model_decision_is_forced_to_personal_kb_first() -> None:
@@ -180,7 +313,7 @@ def test_knowledge_style_model_decision_is_forced_to_personal_kb_first() -> None
     assert result.need_retrieval is True
     assert result.answer_source == "personal_kb"
     assert result.allow_model_fallback is True
-    assert result.priority_reason == "personal_kb_first"
+    assert result.priority_reason == "kb_first"
 
 
 def test_non_explicit_question_does_not_trust_model_kb_required_flag() -> None:
@@ -203,7 +336,7 @@ def test_non_explicit_question_does_not_trust_model_kb_required_flag() -> None:
     assert result.need_retrieval is True
     assert result.kb_required is False
     assert result.allow_model_fallback is True
-    assert result.priority_reason == "rag"
+    assert result.priority_reason == "kb_first"
 
 
 def test_memory_candidate_question_is_forced_to_personal_kb_first() -> None:
@@ -227,7 +360,7 @@ def test_memory_candidate_question_is_forced_to_personal_kb_first() -> None:
     assert result.intent == "answer_question"
     assert result.answer_source == "personal_kb"
     assert result.allow_model_fallback is True
-    assert result.priority_reason == "personal_kb_first"
+    assert result.priority_reason == "kb_first"
 
 
 def test_conflicting_memory_candidate_retrieval_decision_prefers_kb_first() -> None:
@@ -252,7 +385,7 @@ def test_conflicting_memory_candidate_retrieval_decision_prefers_kb_first() -> N
     assert result.answer_source == "personal_kb"
     assert result.kb_required is False
     assert result.allow_model_fallback is True
-    assert result.priority_reason == "personal_kb_first"
+    assert result.priority_reason == "kb_first"
 
 
 def test_stored_preference_question_is_not_memory_candidate() -> None:
@@ -275,7 +408,30 @@ def test_stored_preference_question_is_not_memory_candidate() -> None:
     assert result.need_retrieval is True
     assert result.intent == "answer_question"
     assert result.answer_source == "personal_kb"
-    assert result.priority_reason == "personal_kb_first"
+    assert result.priority_reason == "kb_first"
+
+
+def test_mixed_memory_statement_and_question_prefers_kb_first() -> None:
+    result = normalize_route_decision(
+        decision(
+            need_retrieval=False,
+            intent="memory_candidate",
+            domain="personal_kb",
+            query_type="statement",
+            retrieval_strategy="none",
+            answer_source="none",
+            kb_required=False,
+            allow_model_fallback=False,
+            confidence=0.95,
+        ),
+        reranker_enabled=False,
+        query="记住我喜欢蓝色，另外 ShowMaker 是谁",
+    )
+
+    assert result.need_retrieval is True
+    assert result.intent == "answer_question"
+    assert result.answer_source == "personal_kb"
+    assert result.priority_reason == "kb_first"
 
 
 def test_explicit_training_knowledge_query_can_still_skip_retrieval() -> None:
@@ -297,7 +453,7 @@ def test_explicit_training_knowledge_query_can_still_skip_retrieval() -> None:
 
     assert result.need_retrieval is False
     assert result.answer_source == "model"
-    assert result.priority_reason == "model"
+    assert result.priority_reason == "direct_model"
 
 
 def test_arithmetic_casual_chat_decision_is_forced_to_model_answer() -> None:
@@ -320,7 +476,7 @@ def test_arithmetic_casual_chat_decision_is_forced_to_model_answer() -> None:
     assert result.need_retrieval is False
     assert result.intent == "answer_question"
     assert result.answer_source == "model"
-    assert result.priority_reason == "direct_model_rule"
+    assert result.priority_reason == "direct_model"
 
 
 def test_arithmetic_personal_kb_decision_is_forced_to_model_answer() -> None:
@@ -342,7 +498,7 @@ def test_arithmetic_personal_kb_decision_is_forced_to_model_answer() -> None:
 
     assert result.need_retrieval is False
     assert result.answer_source == "model"
-    assert result.priority_reason == "direct_model_rule"
+    assert result.priority_reason == "direct_model"
 
 
 def test_personal_kb_question_allows_model_fallback() -> None:
@@ -438,8 +594,8 @@ def test_non_rag_intent_normalizes_strategy_to_none() -> None:
 
     assert result.need_retrieval is False
     assert result.retrieval_strategy == "none"
-    assert result.priority_reason == "non_rag_intent"
-    assert result.answer_source == "none"
+    assert result.priority_reason == "direct_model"
+    assert result.answer_source == "model"
 
 
 def test_explicit_personal_kb_query_forces_strict_kb_without_fallback() -> None:
@@ -464,7 +620,7 @@ def test_explicit_personal_kb_query_forces_strict_kb_without_fallback() -> None:
     assert result.answer_source == "personal_kb"
     assert result.kb_required is True
     assert result.allow_model_fallback is False
-    assert result.priority_reason == "strict_personal_kb"
+    assert result.priority_reason == "kb_only"
 
 
 def test_high_confidence_no_retrieval_is_not_forced_back_to_rag() -> None:
@@ -481,10 +637,36 @@ def test_high_confidence_no_retrieval_is_not_forced_back_to_rag() -> None:
     )
 
     assert result.need_retrieval is False
-    assert result.intent == "casual_chat"
+    assert result.intent == "answer_question"
     assert result.retrieval_strategy == "none"
-    assert result.priority_reason == "non_rag_intent"
-    assert result.answer_source == "none"
+    assert result.priority_reason == "direct_model"
+    assert result.answer_source == "model"
+
+
+def test_colloquial_knowledge_questions_are_forced_to_personal_kb_first() -> None:
+    for query in ("炫神最爱的歌叫啥", "电棍跟炫神啥关系", "电棍跟炫神什么关系"):
+        result = normalize_route_decision(
+            decision(
+                need_retrieval=False,
+                intent="answer_question",
+                domain="general_chat",
+                query_type="other",
+                retrieval_strategy="none",
+                answer_source="model",
+                kb_required=False,
+                allow_model_fallback=False,
+                confidence=0.97,
+            ),
+            reranker_enabled=False,
+            query=query,
+        )
+
+        assert result.need_retrieval is True
+        assert result.intent == "answer_question"
+        assert result.answer_source == "personal_kb"
+        assert result.kb_required is False
+        assert result.allow_model_fallback is True
+        assert result.priority_reason == "kb_first"
 
 
 def test_answer_question_forces_retrieval_and_downgrades_missing_reranker() -> None:
@@ -496,10 +678,11 @@ def test_answer_question_forces_retrieval_and_downgrades_missing_reranker() -> N
             confidence=0.93,
         ),
         reranker_enabled=False,
+        query="高斯是谁",
     )
 
     assert result.need_retrieval is True
-    assert result.priority_reason == "rag"
+    assert result.priority_reason == "kb_first"
     assert result.retrieval_strategy == "hybrid"
     assert result.answer_source == "personal_kb"
 
@@ -574,7 +757,7 @@ def test_ollama_router_uses_json_schema_stream_false_and_context(monkeypatch) ->
     assert user_payload["query"] == "那他为什么这样"
     assert user_payload["recent_context"][0]["content"] == "如何评价炫神"
     assert result.need_retrieval is True
-    assert result.priority_reason == "rag"
+    assert result.priority_reason == "kb_first"
 
 
 def test_ollama_router_bad_response_falls_back(monkeypatch) -> None:

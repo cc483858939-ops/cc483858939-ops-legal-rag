@@ -1,0 +1,120 @@
+queries:
+  - id: zh-real-song-lyric-direct
+    query: "打火机歌词是什么"
+    expected_terms: ["打火机", "吉隆坡的天气", "翻云又覆雨"]
+    category: song
+    tags: ["real_user", "attribute"]
+
+  - id: zh-real-song-lyric-fragment
+    query: "吉隆坡天气那句歌词后面是什么"
+    expected_terms: ["吉隆坡的天气", "翻云又覆雨"]
+    category: song
+    tags: ["real_user", "fragment"]
+
+  - id: zh-real-song-name-colloquial
+    query: "炫神最爱的歌叫啥"
+    expected_terms: ["炫神", "最喜欢的歌", "打火机"]
+    category: song
+    tags: ["real_user", "colloquial"]
+
+  - id: zh-real-song-reason
+    query: "他为啥喜欢打火机"
+    expected_terms: ["打火机", "妹妹", "雨", "妈妈", "云"]
+    category: song
+    tags: ["real_user", "pronoun"]
+
+  - id: zh-real-song-family-clue
+    query: "那首歌和他妈妈妹妹名字有什么关系"
+    expected_terms: ["妹妹", "带雨", "妈妈", "带云"]
+    category: song
+    tags: ["real_user", "pronoun", "implicit"]
+
+  - id: zh-real-xuanshen-who
+    query: "炫狗是谁"
+    expected_terms: ["炫神", "炫狗"]
+    category: people
+    tags: ["real_user", "alias"]
+
+  - id: zh-real-xuanshen-alias
+    query: "炫神别名是什么"
+    expected_terms: ["炫神", "炫狗"]
+    category: people
+    tags: ["real_user", "attribute"]
+
+  - id: zh-real-dasima-relation
+    query: "马老师和炫神啥关系"
+    expected_terms: ["大司马", "马老师", "结拜大哥"]
+    category: people
+    tags: ["real_user", "alias", "relation"]
+
+  - id: zh-real-diangun-relation
+    query: "电棍跟炫神什么关系"
+    expected_terms: ["电棍", "兄弟"]
+    category: people
+    tags: ["real_user", "relation"]
+
+  - id: zh-real-fathers-colloquial
+    query: "炫神认了哪些爹"
+    expected_terms: ["父亲包括", "Faker", "Showmaker", "Theshy"]
+    category: people
+    tags: ["real_user", "colloquial"]
+
+  - id: zh-real-most-filial
+    query: "炫神最孝顺谁"
+    expected_terms: ["ShowMaker", "最孝顺", "久病床前有孝子"]
+    category: people
+    tags: ["real_user", "relation"]
+
+  - id: zh-real-theshy-attitude
+    query: "炫神对 theshy 到底是崇拜还是叛逆"
+    expected_terms: ["The shy", "崇拜", "叛逆"]
+    category: people
+    tags: ["real_user", "mixed_case"]
+
+  - id: zh-real-showmaker-title
+    query: "ShowMaker 在这篇笔记里被怎么描述"
+    expected_terms: ["ShowMaker", "世界第一中单", "炫狗是他的儿子"]
+    category: people
+    tags: ["real_user", "mixed"]
+
+  - id: zh-real-showmaker-quote
+    query: "重铸 LCK 荣光那句话是谁的"
+    expected_terms: ["ShowMaker", "圣经", "重铸LCK荣光我辈义不容辞"]
+    category: people
+    tags: ["real_user", "fragment", "mixed"]
+
+  - id: zh-real-memory-types
+    query: "Agent 记忆分哪几种"
+    expected_terms: ["短期会话记忆", "长期事实记忆", "任务轨迹记忆"]
+    category: memory
+    tags: ["real_user"]
+
+  - id: zh-real-memory-preference
+    query: "用户稳定偏好应该记到哪里"
+    expected_terms: ["长期事实记忆", "稳定偏好"]
+    category: memory
+    tags: ["real_user", "attribute"]
+
+  - id: zh-real-memory-debug
+    query: "工具调用失败原因和调试路径应该放哪"
+    expected_terms: ["任务轨迹记忆", "失败原因", "调试路径"]
+    category: memory
+    tags: ["real_user"]
+
+  - id: zh-real-memory-context
+    query: "当前对话上下文靠哪种记忆维持"
+    expected_terms: ["短期会话记忆", "当前对话上下文"]
+    category: memory
+    tags: ["real_user"]
+
+  - id: zh-real-rag-metrics
+    query: "测 RAG 靠不靠谱要看哪些指标"
+    expected_terms: ["命中率", "MRR", "nDCG", "引用召回率", "拒答准确率"]
+    category: rag_eval
+    tags: ["real_user", "broad"]
+
+  - id: zh-real-kb-vs-support
+    query: "个人知识库助手比智能客服多做什么"
+    expected_terms: ["沉淀知识", "更新笔记", "整理主题", "形成长期记忆"]
+    category: personal_kb
+    tags: ["real_user", "broad"]

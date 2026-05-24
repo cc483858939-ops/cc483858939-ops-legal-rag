@@ -23,6 +23,7 @@ class Settings(BaseSettings):
 
     embedding_backend: str = "fastembed"
     embedding_model: str = "BAAI/bge-small-zh-v1.5"
+    sparse_backend: str = "bm25_jieba"
     sparse_model: str = "Qdrant/bm25"
     dense_weight: float = 0.55
     bm25_weight: float = 0.45

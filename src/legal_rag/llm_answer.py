@@ -24,6 +24,7 @@ NO_EVIDENCE_ANSWER = "当前知识库没有检索到足够证据，不能生成�
 
 CAUSAL_QUESTION_CUES = (
     "为什么",
+    "为啥",
     "为何",
     "原因",
     "怎么会",
@@ -51,8 +52,17 @@ CAUSAL_EVIDENCE_CUES = (
 )
 
 LIST_QUESTION_CUES = ("有哪些", "哪些", "列出", "包括", "list", "which", "what are")
-DEFINITION_QUESTION_CUES = ("是什么", "什么意思", "定义", "what is", "define", "meaning")
-FACTUAL_QUESTION_CUES = ("是谁", "谁", "哪里", "是否", "who", "where")
+DEFINITION_QUESTION_CUES = ("是什么", "什么意思", "定义", "叫啥", "what is", "define", "meaning")
+FACTUAL_QUESTION_CUES = ("是谁", "谁", "哪里", "是否", "什么关系", "啥关系", "who", "where")
+LOCATION_CLASSIFICATION_QUESTION_CUES = (
+    "放哪",
+    "记到哪",
+    "记到哪里",
+    "应该放",
+    "靠哪种",
+    "哪种记忆",
+    "属于哪",
+)
 EVALUATIVE_QUESTION_CUES = (
     "如何评价",
     "怎么评价",
@@ -214,6 +224,43 @@ QUESTION_CUES_FOR_TERM_REMOVAL = (
     + SUMMARY_QUESTION_CUES
     + FACTUAL_QUESTION_CUES
 )
+QUERY_SCOPE_CUES_FOR_TERM_REMOVAL = (
+    "我的知识库里",
+    "个人知识库里",
+    "我的笔记里",
+    "我的资料里",
+    "我的文档里",
+    "我的语料里",
+    "知识库里",
+    "笔记里",
+    "资料里",
+    "文档里",
+    "语料里",
+    "根据我的知识库",
+    "根据个人知识库",
+    "根据我的笔记",
+    "根据我的资料",
+    "根据我的文档",
+    "根据知识库",
+)
+RELATION_TERMS_FOR_REMOVAL = {
+    "关系",
+    "什么关系",
+}
+PRONOUN_QUERY_TERMS = {
+    "那他",
+    "那她",
+    "那它",
+    "这个人",
+    "那个人",
+    "这人",
+    "那人",
+    "他",
+    "她",
+    "它",
+    "这个",
+    "那个",
+}
 
 
 @dataclass(frozen=True)
@@ -358,17 +405,16 @@ class AnswerabilityGate:
             )
 
         matched_terms = matched_query_terms_in_hits(extract_query_terms(question), hits[:8])
-        answerable = bool(matched_terms)
         return AnswerabilityResult(
             question_type=question_type,
-            answerable=answerable,
+            answerable=True,
             checked_hit_count=checked_hit_count,
             required_evidence="直接回答问题的检索证据",
-            answer_mode="direct" if answerable else "refuse",
-            answer_status="answered" if answerable else "refused",
+            answer_mode="direct",
+            answer_status="answered",
             matched_cues=matched_terms,
-            missing_evidence=[] if answerable else ["direct_evidence"],
-            reason=None if answerable else "insufficient_direct_evidence",
+            missing_evidence=[],
+            reason=None,
         )
 
 
@@ -696,11 +742,12 @@ def _build_messages(
 
 def _build_general_messages(question: str, *, fallback_from_kb: bool = False) -> list[dict[str, str]]:
     fallback_instruction = (
-        "The personal knowledge base was searched first, but no directly relevant evidence was "
-        "found. Answer from general model knowledge only. Be explicit that the personal knowledge "
-        "base did not provide the answer, and do not invent citations or personal-KB facts. "
+        "用户的问题已经先检索个人知识库，但没有找到直接相关内容。"
+        "如果用户使用中文，回答必须以“个人知识库没有找到直接相关内容；根据一般常识，”开头；"
+        "如果用户使用其他语言，也要先说明 personal knowledge base did not contain direct evidence. "
+        "只能使用通用模型知识回答，不要编造个人知识库事实，不要生成引用。"
         if fallback_from_kb
-        else "This question does not require personal knowledge-base retrieval. Answer from general model knowledge only. "
+        else "This question does not require personal knowledge-base retrieval. Answer directly from general model knowledge only. "
     )
     return [
         {
@@ -767,10 +814,10 @@ def _extract_answer_text(data: Any) -> str:
 def _prefix_kb_fallback_answer(question: str, answer: str) -> str:
     clean = normalize_whitespace(answer)
     if _looks_chinese(question):
-        prefix = "个人知识库没有找到直接相关内容；按通用知识，"
+        prefix = "个人知识库没有找到直接相关内容；根据一般常识，"
         if clean.startswith("个人知识库没有找到") or clean.startswith("你的个人知识库没有找到"):
             return clean
-        return f"{prefix}{clean}" if clean else "个人知识库没有找到直接相关内容；按通用知识，我也没有足够信息可靠回答。"
+        return f"{prefix}{clean}" if clean else "个人知识库没有找到直接相关内容；根据一般常识，我也没有足够信息可靠回答。"
     prefix = "I did not find directly relevant content in your personal knowledge base. From general knowledge, "
     if clean.casefold().startswith("i did not find directly relevant content"):
         return clean
@@ -806,6 +853,8 @@ def _elapsed_ms(started: float) -> float:
 
 def classify_question_type(question: str) -> str:
     normalized = question.casefold()
+    if _contains_any(normalized, LOCATION_CLASSIFICATION_QUESTION_CUES):
+        return "factual"
     if _contains_any(normalized, CAUSAL_QUESTION_CUES):
         return "causal"
     if _contains_any(normalized, EVALUATIVE_QUESTION_CUES):
@@ -879,19 +928,38 @@ def matched_query_terms_in_hits(query_terms: list[str], hits: list[RetrievalHit]
 
 def extract_query_terms(question: str) -> list[str]:
     normalized = question.casefold()
+    for cue in QUERY_SCOPE_CUES_FOR_TERM_REMOVAL:
+        normalized = normalized.replace(cue.casefold(), " ")
     for cue in QUESTION_CUES_FOR_TERM_REMOVAL:
         normalized = normalized.replace(cue.casefold(), " ")
 
     terms: list[str] = []
     for match in re.finditer(r"[a-z0-9][a-z0-9_.-]{1,}", normalized):
         term = match.group(0).strip("_.-")
-        if term and term not in STOP_QUERY_TERMS:
+        if _is_valid_query_term(term):
             terms.append(term)
     for match in re.finditer(r"[\u4e00-\u9fff]{2,}", normalized):
-        term = match.group(0)
-        if term and term not in STOP_QUERY_TERMS:
-            terms.append(term)
+        chunk = match.group(0)
+        parts = [part for part in re.split(r"[和与及、，,/的]+", chunk) if part]
+        if len(parts) > 1:
+            for part in parts:
+                if _is_valid_query_term(part):
+                    terms.append(part)
+            continue
+        if _is_valid_query_term(chunk):
+            terms.append(chunk)
     return dedupe_preserve_order(terms)
+
+
+def _is_valid_query_term(term: str) -> bool:
+    term = term.strip()
+    return bool(
+        term
+        and len(term) >= 2
+        and term not in STOP_QUERY_TERMS
+        and term not in RELATION_TERMS_FOR_REMOVAL
+        and term not in PRONOUN_QUERY_TERMS
+    )
 
 
 def split_evidence_sentences(text: str) -> list[str]:

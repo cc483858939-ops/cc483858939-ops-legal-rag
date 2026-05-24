@@ -18,6 +18,7 @@ def test_default_embedding_uses_lightweight_chinese_fastembed() -> None:
 
     assert settings.embedding_backend == "fastembed"
     assert settings.embedding_model == "BAAI/bge-small-zh-v1.5"
+    assert settings.sparse_backend == "bm25_jieba"
     assert settings.reranker_model is None
 
 
@@ -42,6 +43,14 @@ def test_dense_only_and_bm25_only_modes_work(retriever) -> None:
 
     assert any(hit.citation == "17 U.S.C. § 107" for hit in dense_hits)
     assert any(hit.citation == "17 U.S.C. § 107" for hit in bm25_hits)
+
+
+def test_bm25_mode_matches_chinese_personal_note(retriever) -> None:
+    hits = retriever.retrieve("炫神最喜欢什么歌", top_k=8, mode="bm25")
+
+    assert hits
+    assert hits[0].bm25_score > 0
+    assert any("打火机" in hit.text for hit in hits)
 
 
 def test_metadata_filter_limits_retrieval_results(retriever) -> None:

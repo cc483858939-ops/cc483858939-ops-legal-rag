@@ -12,7 +12,7 @@
 ## 默认模型
 
 - Dense embedding：`BAAI/bge-small-zh-v1.5` via FastEmbed/ONNX，默认优先低内存中文检索
-- Sparse BM25：`Qdrant/bm25`
+- Sparse BM25：默认 `bm25-jieba` 应用层中文 BM25；兼容模式可显式启用 `Qdrant/bm25`
 - 可选 reranker：默认不安装、不启用；如需重排再设置 `RERANKER_MODEL`
 
 备选：
@@ -20,7 +20,7 @@
 - FastEmbed embedding：`BAAI/bge-small-zh-v1.5`、`BAAI/bge-base-en-v1.5`、`BAAI/bge-large-en-v1.5`、`sentence-transformers/all-MiniLM-L6-v2`、`snowflake/snowflake-arctic-embed-l`、`intfloat/multilingual-e5-large`
 - SentenceTransformers embedding：`BAAI/bge-base-zh-v1.5`、`BAAI/bge-m3`、`intfloat/e5-large-v2`、`Snowflake/snowflake-arctic-embed-l-v2.0`，需要 `EMBEDDING_BACKEND=sentence-transformers` 和 `INSTALL_MODEL_EXTRAS=true`
 - Reranker：`cross-encoder/ms-marco-MiniLM-L6-v2`、`BAAI/bge-reranker-large`、`mixedbread-ai/mxbai-rerank-large-v1`，需要 `INSTALL_MODEL_EXTRAS=true`
-- BM25：`Pyserini/Lucene`、`Elasticsearch/OpenSearch`、`rank-bm25`
+- BM25：默认 `bm25-jieba`；备选 `Pyserini/Lucene`、`Elasticsearch/OpenSearch`、`rank-bm25`
 - Query rewrite：默认关闭；可用 Ollama + `gemma4:e2b` 在检索前把中文/口语问题扩展成英文案名、法条、缩写等检索词。
 
 ## 本地运行
@@ -112,6 +112,8 @@ docker compose run --rm test
 
 默认 `api` 和 `cli` 服务使用轻量 FastEmbed 路径，不安装 `sentence-transformers/torch`。
 默认 dense 模型为 `BAAI/bge-small-zh-v1.5`，适合中文知识库 baseline 和低内存本地运行。
+默认 sparse backend 为 `SPARSE_BACKEND=bm25_jieba`，不会下载 FastEmbed sparse 模型；
+只有显式设置 `SPARSE_BACKEND=qdrant_bm25` 时才会使用 `SPARSE_MODEL=Qdrant/bm25`。
 Qdrant 镜像约为 `271MB`。首次真实 ingest 会把 FastEmbed/Hugging Face 模型权重下载到
 Docker volume `legal-rag_model_cache`。
 
