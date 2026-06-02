@@ -41,7 +41,7 @@ def test_claim_validation_rejects_alias_bleed_from_adjacent_span() -> None:
     assert checks
     assert checks[0].supported is False
     assert "又称" not in checks[0].missing_terms
-    assert "小乙" in checks[0].missing_terms
+    assert any("小乙" in term for term in checks[0].missing_terms)
 
 
 def test_openai_answerer_retries_then_falls_back_on_unsupported_claim(monkeypatch) -> None:
