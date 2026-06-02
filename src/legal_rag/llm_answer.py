@@ -13,13 +13,13 @@ from legal_rag.text import normalize_whitespace
 INSUFFICIENT_CAUSAL_EVIDENCE = (
     "知识库检索到了相关内容，但没有明确说明原因，不能可靠回答这个“为什么”问题。"
 )
-
 INSUFFICIENT_EXACT_EVIDENCE = (
     "知识库检索到了相关内容，但没有明确的数字、日期或精确事实，不能可靠回答这个精确问题。"
 )
-
+INSUFFICIENT_SCOPE_EVIDENCE = (
+    "知识库检索到了相关内容，但没有覆盖问题中的限定范围，不能可靠回答。"
+)
 LLM_REFUSED_ANSWER = "模型未能基于已检索材料组织回答。"
-
 NO_EVIDENCE_ANSWER = "当前知识库没有检索到足够证据，不能生成可靠回答。"
 
 CAUSAL_QUESTION_CUES = (
@@ -34,7 +34,6 @@ CAUSAL_QUESTION_CUES = (
     "because",
     "due to",
 )
-
 CAUSAL_EVIDENCE_CUES = (
     "因为",
     "由于",
@@ -50,7 +49,6 @@ CAUSAL_EVIDENCE_CUES = (
     "reason",
     "therefore",
 )
-
 LIST_QUESTION_CUES = ("有哪些", "哪些", "列出", "包括", "list", "which", "what are")
 DEFINITION_QUESTION_CUES = ("是什么", "什么意思", "定义", "叫啥", "what is", "define", "meaning")
 FACTUAL_QUESTION_CUES = ("是谁", "谁", "哪里", "是否", "什么关系", "啥关系", "who", "where")
@@ -147,6 +145,36 @@ LLM_REFUSAL_CUES = (
     "can't answer",
 )
 RETRYABLE_LLM_REFUSAL_TYPES = {"evaluative", "list", "summary", "procedural"}
+QUESTION_CUES_FOR_TERM_REMOVAL = (
+    CAUSAL_QUESTION_CUES
+    + LIST_QUESTION_CUES
+    + DEFINITION_QUESTION_CUES
+    + EVALUATIVE_QUESTION_CUES
+    + COMPARISON_QUESTION_CUES
+    + PROCEDURAL_QUESTION_CUES
+    + EXACT_QUESTION_CUES
+    + SUMMARY_QUESTION_CUES
+    + FACTUAL_QUESTION_CUES
+)
+QUERY_SCOPE_CUES_FOR_TERM_REMOVAL = (
+    "我的知识库里",
+    "个人知识库里",
+    "我的笔记里",
+    "我的资料里",
+    "我的文档里",
+    "我的语料里",
+    "知识库里",
+    "笔记里",
+    "资料里",
+    "文档里",
+    "语料里",
+    "根据我的知识库",
+    "根据个人知识库",
+    "根据我的笔记",
+    "根据我的资料",
+    "根据我的文档",
+    "根据知识库",
+)
 STOP_QUERY_TERMS = {
     "为什么",
     "为何",
@@ -212,54 +240,67 @@ STOP_QUERY_TERMS = {
     "summary",
     "summarize",
 }
-
-QUESTION_CUES_FOR_TERM_REMOVAL = (
-    CAUSAL_QUESTION_CUES
-    + LIST_QUESTION_CUES
-    + DEFINITION_QUESTION_CUES
-    + EVALUATIVE_QUESTION_CUES
-    + COMPARISON_QUESTION_CUES
-    + PROCEDURAL_QUESTION_CUES
-    + EXACT_QUESTION_CUES
-    + SUMMARY_QUESTION_CUES
-    + FACTUAL_QUESTION_CUES
-)
-QUERY_SCOPE_CUES_FOR_TERM_REMOVAL = (
-    "我的知识库里",
-    "个人知识库里",
-    "我的笔记里",
-    "我的资料里",
-    "我的文档里",
-    "我的语料里",
-    "知识库里",
-    "笔记里",
-    "资料里",
-    "文档里",
-    "语料里",
-    "根据我的知识库",
-    "根据个人知识库",
-    "根据我的笔记",
-    "根据我的资料",
-    "根据我的文档",
-    "根据知识库",
-)
-RELATION_TERMS_FOR_REMOVAL = {
+RELATION_TERMS_FOR_REMOVAL = {"关系", "什么关系"}
+PRONOUN_QUERY_TERMS = {"那他", "那她", "那它", "这个人", "那个人", "这人", "那人", "他", "她", "它", "这个", "那个"}
+CLAIM_RELATION_CUES = (
+    "又称",
+    "也称",
+    "也叫",
+    "别名",
+    "被称为",
+    "被描述为",
+    "父亲",
+    "母亲",
+    "兄弟",
     "关系",
-    "什么关系",
-}
-PRONOUN_QUERY_TERMS = {
-    "那他",
-    "那她",
-    "那它",
-    "这个人",
-    "那个人",
-    "这人",
-    "那人",
-    "他",
-    "她",
-    "它",
-    "这个",
-    "那个",
+    "成就",
+    "口号",
+    "最喜欢",
+    "第一中单",
+    " 是 ",
+    "是",
+)
+MISSING_EVIDENCE_CUES = (
+    "缺少",
+    "没有",
+    "未提到",
+    "没有找到",
+    "不能可靠回答",
+    "证据不足",
+    "insufficient",
+    "not enough",
+    "did not find",
+)
+CLAIM_TOKEN_STOPWORDS = {
+    "根据",
+    "你的",
+    "个人知识库",
+    "知识库",
+    "现有材料",
+    "材料",
+    "来看",
+    "可以",
+    "说明",
+    "提到",
+    "只提到",
+    "描述",
+    "被描述为",
+    "被称为",
+    "又称",
+    "也称",
+    "也叫",
+    "别名",
+    "父亲",
+    "母亲",
+    "兄弟",
+    "关系",
+    "成就",
+    "口号",
+    "证据",
+    "依据",
+    "当前",
+    "支持",
+    "回答",
 }
 
 
@@ -282,6 +323,46 @@ class LLMAnswerConfig:
             "max_tokens": self.max_tokens,
             "timeout_seconds": self.timeout_seconds,
             "api_key_configured": bool(self.api_key),
+        }
+
+
+@dataclass(frozen=True)
+class SupportSpan:
+    span_id: str
+    hit_rank: int
+    chunk_id: str
+    source_id: str
+    title: str
+    citation: str
+    text: str
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "span_id": self.span_id,
+            "hit_rank": self.hit_rank,
+            "chunk_id": self.chunk_id,
+            "source_id": self.source_id,
+            "title": self.title,
+            "citation": self.citation,
+            "text": self.text,
+        }
+
+
+@dataclass(frozen=True)
+class ClaimCheck:
+    claim: str
+    support_span_ids: list[str]
+    supported: bool
+    missing_terms: list[str] = field(default_factory=list)
+    reason: str | None = None
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "claim": self.claim,
+            "support_span_ids": self.support_span_ids,
+            "supported": self.supported,
+            "missing_terms": self.missing_terms,
+            "reason": self.reason,
         }
 
 
@@ -404,6 +485,20 @@ class AnswerabilityGate:
                 missing_evidence=[] if has_steps else ["complete_steps"],
             )
 
+        missing_scope = missing_required_scope_terms(question, hits[:8])
+        if missing_scope:
+            return AnswerabilityResult(
+                question_type=question_type,
+                answerable=False,
+                checked_hit_count=checked_hit_count,
+                required_evidence="覆盖问题限定范围和谓词关系的直接证据",
+                answer_mode="refuse",
+                answer_status="refused",
+                matched_cues=matched_query_terms_in_hits(extract_query_terms(question), hits[:8]),
+                missing_evidence=missing_scope,
+                reason="missing_required_query_scope",
+            )
+
         matched_terms = matched_query_terms_in_hits(extract_query_terms(question), hits[:8])
         return AnswerabilityResult(
             question_type=question_type,
@@ -431,6 +526,7 @@ class OpenAICompatibleAnswerer:
     def generate(self, question: str, hits: list[RetrievalHit]) -> dict[str, Any]:
         started = time.perf_counter()
         grounding = self.answerability_gate.evaluate(question, hits)
+        support_spans = select_support_spans(question, hits, grounding=grounding)
         if not hits:
             return {
                 "enabled": True,
@@ -472,7 +568,7 @@ class OpenAICompatibleAnswerer:
                 "answer_status": "error",
                 "answer": None,
                 "citations": [],
-                "grounding": grounding.as_dict(),
+                "grounding": _grounding_payload(grounding, support_spans),
                 "llm": self.config.safe_dict(),
                 "usage": None,
                 "duration_ms": _elapsed_ms(started),
@@ -481,7 +577,7 @@ class OpenAICompatibleAnswerer:
 
         payload = {
             "model": self.config.model,
-            "messages": _build_messages(question, hits, grounding=grounding),
+            "messages": _build_messages(question, support_spans, grounding=grounding),
             "temperature": self.config.temperature,
             "max_tokens": self.config.max_tokens,
         }
@@ -504,7 +600,7 @@ class OpenAICompatibleAnswerer:
                 retry_count = 1
                 retry_payload = {
                     **payload,
-                    "messages": _build_messages(question, hits, grounding=grounding, retry=True),
+                    "messages": _build_messages(question, support_spans, grounding=grounding, retry=True),
                 }
                 response = httpx.post(
                     _chat_completions_url(self.config.base_url),
@@ -525,7 +621,7 @@ class OpenAICompatibleAnswerer:
                     "answer_status": "llm_refused",
                     "answer": LLM_REFUSED_ANSWER,
                     "citations": [],
-                    "grounding": grounding.as_dict(),
+                    "grounding": _grounding_payload(grounding, support_spans),
                     "llm": self.config.safe_dict(),
                     "usage": data.get("usage") if isinstance(data, dict) else None,
                     "duration_ms": _elapsed_ms(started),
@@ -533,6 +629,59 @@ class OpenAICompatibleAnswerer:
                     "error": None,
                 }
 
+            claim_checks = validate_grounded_claims(answer, support_spans, grounding=grounding)
+            unsupported_claims = [check for check in claim_checks if not check.supported]
+            if unsupported_claims and retry_count == 0:
+                retry_count = 1
+                retry_payload = {
+                    **payload,
+                    "messages": _build_messages(
+                        question,
+                        support_spans,
+                        grounding=grounding,
+                        retry=True,
+                        unsupported_claims=unsupported_claims,
+                    ),
+                }
+                response = httpx.post(
+                    _chat_completions_url(self.config.base_url),
+                    json=retry_payload,
+                    headers=headers,
+                    timeout=self.config.timeout_seconds,
+                )
+                response.raise_for_status()
+                data = response.json()
+                answer = _extract_answer_text(data)
+                claim_checks = validate_grounded_claims(answer, support_spans, grounding=grounding)
+                unsupported_claims = [check for check in claim_checks if not check.supported]
+
+            if unsupported_claims:
+                answer, used_span_ids = build_extractive_answer(question, support_spans, grounding)
+                claim_checks = validate_grounded_claims(answer, support_spans, grounding=grounding)
+                unsupported_claims = [check for check in claim_checks if not check.supported]
+                return {
+                    "enabled": True,
+                    "skipped": False,
+                    "reason": "unsupported_claim_fallback",
+                    "refused": False,
+                    "answer_status": "partial" if grounding.answer_status == "partial" else "answered",
+                    "answer": answer,
+                    "citations": _citations_for_spans(support_spans, used_span_ids),
+                    "grounding": _grounding_payload(
+                        grounding,
+                        support_spans,
+                        claim_checks=claim_checks,
+                        unsupported_claims=unsupported_claims,
+                        used_span_ids=used_span_ids,
+                    ),
+                    "llm": self.config.safe_dict(),
+                    "usage": data.get("usage") if isinstance(data, dict) else None,
+                    "duration_ms": _elapsed_ms(started),
+                    "retry_count": retry_count,
+                    "error": None,
+                }
+
+            used_span_ids = used_support_span_ids(answer, support_spans)
             return {
                 "enabled": True,
                 "skipped": False,
@@ -540,8 +689,14 @@ class OpenAICompatibleAnswerer:
                 "refused": False,
                 "answer_status": grounding.answer_status,
                 "answer": answer,
-                "citations": _citations(hits),
-                "grounding": grounding.as_dict(),
+                "citations": _citations_for_spans(support_spans, used_span_ids),
+                "grounding": _grounding_payload(
+                    grounding,
+                    support_spans,
+                    claim_checks=claim_checks,
+                    unsupported_claims=unsupported_claims,
+                    used_span_ids=used_span_ids,
+                ),
                 "llm": self.config.safe_dict(),
                 "usage": data.get("usage") if isinstance(data, dict) else None,
                 "duration_ms": _elapsed_ms(started),
@@ -556,8 +711,8 @@ class OpenAICompatibleAnswerer:
                 "refused": False,
                 "answer_status": "error",
                 "answer": None,
-                "citations": _citations(hits),
-                "grounding": grounding.as_dict(),
+                "citations": _citations_for_spans(support_spans, []),
+                "grounding": _grounding_payload(grounding, support_spans),
                 "llm": self.config.safe_dict(),
                 "usage": None,
                 "duration_ms": _elapsed_ms(started),
@@ -675,51 +830,66 @@ class GeneralKnowledgeAnswerer:
 
 def _build_messages(
     question: str,
-    hits: list[RetrievalHit],
+    support_spans: list[SupportSpan],
     *,
     grounding: AnswerabilityResult | None = None,
     retry: bool = False,
+    unsupported_claims: list[ClaimCheck] | None = None,
 ) -> list[dict[str, str]]:
-    evidence = "\n\n".join(_format_evidence(index, hit) for index, hit in enumerate(hits[:8], 1))
-    grounding = grounding or AnswerabilityGate().evaluate(question, hits)
+    evidence = "\n\n".join(_format_support_span(span) for span in support_spans[:8])
+    grounding = grounding or AnswerabilityResult(
+        question_type=classify_question_type(question),
+        answerable=bool(support_spans),
+        checked_hit_count=len(support_spans),
+        required_evidence="直接回答问题的检索证据",
+        answer_mode="direct",
+        answer_status="answered",
+    )
+    unsupported_note = ""
+    if unsupported_claims:
+        bad = "; ".join(check.claim for check in unsupported_claims[:3])
+        unsupported_note = (
+            "The previous answer contained unsupported claims: "
+            f"{bad}. Remove any claim not directly supported by a cited support span. "
+        )
     retry_note = (
         "The previous answer was too conservative. The evidence is usable for this question "
         "type, so produce the allowed grounded or partial answer instead of replying only "
         "that evidence is insufficient. "
-        if retry
-        else ""
+        if retry and not unsupported_claims
+        else unsupported_note
     )
     return [
         {
             "role": "system",
             "content": (
-                "You are a grounded RAG answer layer. Answer only from the provided evidence. "
-                "Treat the evidence as the user's personal knowledge base. When the user asks in "
-                "Chinese, prefer starting the answer with '根据你的个人知识库，'. "
-                "First decide whether the evidence directly answers, partially answers, or cannot "
-                "answer the question. "
-                "Use the same language as the user when possible. Cite claims with bracketed "
-                "evidence numbers like [1] or [2]. Every factual claim must be supported by the "
-                "provided evidence. "
-                "For why/reason/causal questions, answer only when the evidence explicitly "
-                "states a cause, reason, motive, or causal chain. If the evidence only repeats "
-                "a related fact or conclusion without explaining why, say the evidence is "
-                "insufficient. "
-                "For evaluate/assess/opinion-style questions, synthesize an evidence-backed "
-                "assessment from descriptive facts in the evidence. Start with '根据现有材料来看' "
-                "when the user asks in Chinese. Do not require the evidence to literally contain "
-                "an evaluation label, but do not add outside opinions. "
-                "For list questions, list only items mentioned in evidence and say they are what "
-                "the current materials mention. "
-                "For comparison questions, compare only sides that have evidence; if one side is "
-                "missing, give the supported side and state the gap. "
-                "For procedural questions, give known steps only; if the complete procedure is "
-                "missing, state that the materials only support a partial procedure. "
-                "For exact number/date/time questions, answer only when exact evidence is present. "
-                "Do not invent policy, law, numbers, timelines, URLs, or commitments. "
-                "Keep answers short: use one compact paragraph by default, or at most three "
-                "bullets when a list or procedure is necessary. "
-                f"{retry_note}"
+                "You are a grounded RAG answer layer. Answer only from the provided support spans, "
+                "not from the original chunks and not from general knowledge. Treat the support spans "
+                "as the user's personal knowledge base. When the user asks in Chinese, prefer starting "
+                "the answer with '根据你的个人知识库，'. First decide whether the support spans directly "
+                "answer, partially answer, or cannot answer the question. Use the same language as the "
+                "user when possible. Cite every factual claim with bracketed support span ids like [S1] "
+                "or [S2]. Every factual claim must be supported by the cited span. Do not cite a span "
+                "unless that exact span supports the claim. Do not merge adjacent facts across spans: "
+                "aliases, relationships, relatives, achievements, slogans, dates, numbers, and named "
+                "entities must come from the same cited support span unless another cited span explicitly "
+                "bridges the relation. If the question contains a domain, game, product, jurisdiction, "
+                "time period, or other scope constraint, the support spans must explicitly cover that "
+                "scope; otherwise state what evidence is missing. For why/reason/causal questions, "
+                "answer only when the support spans explicitly state a cause, reason, motive, or causal "
+                "chain. If the evidence only repeats a related fact or conclusion without explaining why, "
+                "say the evidence is insufficient. For evaluate/assess/opinion-style questions, synthesize "
+                "an evidence-backed assessment from descriptive facts in the support spans. Start with "
+                "'根据现有材料来看' when the user asks in Chinese. Do not require the evidence to literally "
+                "contain an evaluation label, but do not add outside opinions. For list questions, list "
+                "only items mentioned in support spans and say they are what the current materials mention. "
+                "For comparison questions, compare only sides that have support spans; if one side is "
+                "missing, give the supported side and state the gap. For procedural questions, give known "
+                "steps only; if the complete procedure is missing, state that the materials only support "
+                "a partial procedure. For exact number/date/time questions, answer only when exact evidence "
+                "is present. Do not invent policy, law, numbers, timelines, URLs, or commitments. Keep "
+                "answers short: use one compact paragraph by default, or at most three bullets when a list "
+                f"or procedure is necessary. {retry_note}"
             ),
         },
         {
@@ -731,10 +901,10 @@ def _build_messages(
                 f"Required evidence:\n{grounding.required_evidence}\n\n"
                 f"Missing evidence:\n{', '.join(grounding.missing_evidence) if grounding.missing_evidence else 'none'}\n\n"
                 f"Evidence:\n{evidence}\n\n"
-                "If answerable, write a concise answer. If the answer mode is partial, write the "
-                "partial answer and explicitly frame it as based on current materials. Include "
-                "citations next to relevant claims. If not answerable from evidence, say what "
-                "specific evidence is missing."
+                "Answer by units when the question has multiple parts. If answerable, write a concise "
+                "answer. If the answer mode is partial, write the partial answer and explicitly frame it "
+                "as based on current materials. Cite claims next to the relevant support span ids. If not "
+                "answerable from support spans, say what specific evidence is missing."
             ),
         },
     ]
@@ -766,28 +936,279 @@ def _build_general_messages(question: str, *, fallback_from_kb: bool = False) ->
     ]
 
 
-def _format_evidence(index: int, hit: RetrievalHit) -> str:
-    text = normalize_whitespace(hit.text)[:1800]
+def build_support_spans(hits: list[RetrievalHit], *, max_chars: int = 500) -> list[SupportSpan]:
+    spans: list[SupportSpan] = []
+    for hit_rank, hit in enumerate(hits[:8], 1):
+        for raw in split_evidence_sentences(hit.text):
+            for text in _split_relation_clauses(raw):
+                text = normalize_whitespace(text)
+                if not text:
+                    continue
+                if len(text) > max_chars:
+                    text = text[:max_chars].rstrip() + "..."
+                span_id = f"S{len(spans) + 1}"
+                spans.append(
+                    SupportSpan(
+                        span_id=span_id,
+                        hit_rank=hit_rank,
+                        chunk_id=hit.chunk_id,
+                        source_id=hit.source_id,
+                        title=hit.title,
+                        citation=hit.citation,
+                        text=text,
+                    )
+                )
+    return spans
+
+
+def select_support_spans(
+    question: str,
+    hits: list[RetrievalHit],
+    *,
+    grounding: AnswerabilityResult | None = None,
+    limit: int = 8,
+) -> list[SupportSpan]:
+    spans = build_support_spans(hits)
+    if not spans:
+        return []
+    terms = extract_query_terms(question)
+    if grounding:
+        terms.extend(grounding.matched_cues)
+    terms.extend(required_scope_terms(question))
+    terms = dedupe_preserve_order([term for term in terms if _is_valid_query_term(term)])
+    if not terms:
+        return spans[:limit]
+
+    scored: list[tuple[int, int, SupportSpan]] = []
+    for index, span in enumerate(spans):
+        normalized = span.text.casefold()
+        score = sum(1 for term in terms if term.casefold() in normalized)
+        if score:
+            scored.append((score, -index, span))
+    if not scored:
+        return spans[:limit]
+    scored.sort(reverse=True)
+    return [span for _, _, span in scored[:limit]]
+
+
+def validate_grounded_claims(
+    answer: str,
+    support_spans: list[SupportSpan],
+    *,
+    grounding: AnswerabilityResult,
+) -> list[ClaimCheck]:
+    if grounding.question_type not in {"factual", "definition", "exact", "comparison", "causal", "other"}:
+        return []
+    checks: list[ClaimCheck] = []
+    span_by_id = {span.span_id: span for span in support_spans}
+    for claim in split_answer_claims(answer):
+        cited_ids = used_support_span_ids(claim, support_spans)
+        if not cited_ids:
+            continue
+        if _is_missing_evidence_statement(claim):
+            checks.append(ClaimCheck(claim=claim, support_span_ids=cited_ids, supported=True))
+            continue
+        if grounding.question_type == "exact":
+            missing_numbers = [num for num in re.findall(r"\d+(?:\.\d+)?", claim) if not _term_in_spans(num, cited_ids, span_by_id)]
+            checks.append(
+                ClaimCheck(
+                    claim=claim,
+                    support_span_ids=cited_ids,
+                    supported=not missing_numbers,
+                    missing_terms=missing_numbers,
+                    reason=None if not missing_numbers else "missing_exact_value_in_cited_span",
+                )
+            )
+            continue
+        if not _looks_like_relation_claim(claim):
+            checks.append(ClaimCheck(claim=claim, support_span_ids=cited_ids, supported=True))
+            continue
+        tokens = claim_key_terms(claim)
+        missing = [token for token in tokens if not _term_in_spans(token, cited_ids, span_by_id)]
+        checks.append(
+            ClaimCheck(
+                claim=claim,
+                support_span_ids=cited_ids,
+                supported=not missing,
+                missing_terms=missing,
+                reason=None if not missing else "missing_claim_term_in_cited_span",
+            )
+        )
+    return checks
+
+
+def build_extractive_answer(
+    question: str,
+    support_spans: list[SupportSpan],
+    grounding: AnswerabilityResult,
+) -> tuple[str, list[str]]:
+    if not support_spans:
+        return NO_EVIDENCE_ANSWER, []
+    used = [span.span_id for span in support_spans[: min(3, len(support_spans))]]
+    pieces = [span.text for span in support_spans if span.span_id in used]
+    prefix = "根据你的个人知识库，" if _looks_chinese(question) else "Based on your knowledge base, "
+    if grounding.answer_status == "partial":
+        gap = "；但材料不足以完整回答全部问题" if _looks_chinese(question) else "; the materials do not fully answer every part"
+    else:
+        gap = ""
+    citations = " ".join(f"[{span_id}]" for span_id in used)
+    return f"{prefix}{'；'.join(pieces)}{gap}。{citations}", used
+
+
+def _format_support_span(span: SupportSpan) -> str:
     return (
-        f"[{index}] {hit.title}\n"
-        f"Citation: {hit.citation}\n"
-        f"Doc type: {hit.doc_type}\n"
-        f"Section: {hit.section or '-'}\n"
-        f"Text: {text}"
+        f"[{span.span_id}] {span.title}\n"
+        f"Citation: {span.citation}\n"
+        f"Source: {span.source_id}\n"
+        f"Chunk: {span.chunk_id}\n"
+        f"Text: {span.text}"
     )
 
 
-def _citations(hits: list[RetrievalHit]) -> list[dict[str, Any]]:
+def _citations_for_spans(support_spans: list[SupportSpan], used_ids: list[str]) -> list[dict[str, Any]]:
+    if not used_ids:
+        return []
+    output: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for index, span in enumerate(support_spans, 1):
+        if span.span_id not in used_ids or span.span_id in seen:
+            continue
+        output.append(
+            {
+                "rank": index,
+                "title": span.title,
+                "citation": span.citation,
+                "chunk_id": span.chunk_id,
+                "source_id": span.source_id,
+                "support_span_id": span.span_id,
+                "support_text": span.text,
+            }
+        )
+        seen.add(span.span_id)
+    return output
+
+
+def _grounding_payload(
+    grounding: AnswerabilityResult,
+    support_spans: list[SupportSpan],
+    *,
+    claim_checks: list[ClaimCheck] | None = None,
+    unsupported_claims: list[ClaimCheck] | None = None,
+    used_span_ids: list[str] | None = None,
+) -> dict[str, Any]:
+    payload = grounding.as_dict()
+    payload.update(
+        {
+            "answer_units": build_answer_units(grounding),
+            "support_spans": [span.as_dict() for span in support_spans],
+            "claim_checks": [check.as_dict() for check in claim_checks or []],
+            "unsupported_claims": [check.as_dict() for check in unsupported_claims or []],
+            "used_support_span_ids": used_span_ids or [],
+        }
+    )
+    return payload
+
+
+def build_answer_units(grounding: AnswerabilityResult) -> list[dict[str, Any]]:
     return [
         {
-            "rank": index,
-            "title": hit.title,
-            "citation": hit.citation,
-            "chunk_id": hit.chunk_id,
-            "source_id": hit.source_id,
+            "unit_id": "U1",
+            "question_type": grounding.question_type,
+            "answer_status": grounding.answer_status,
+            "answer_mode": grounding.answer_mode,
+            "missing_evidence": grounding.missing_evidence,
         }
-        for index, hit in enumerate(hits[:8], 1)
     ]
+
+
+def used_support_span_ids(answer: str, support_spans: list[SupportSpan]) -> list[str]:
+    valid = {span.span_id for span in support_spans}
+    output: list[str] = []
+    for match in re.finditer(r"\[(?:S)?(\d+)\]", answer, flags=re.IGNORECASE):
+        span_id = f"S{int(match.group(1))}"
+        if span_id in valid and span_id not in output:
+            output.append(span_id)
+    return output
+
+
+def split_answer_claims(answer: str) -> list[str]:
+    normalized = normalize_whitespace(answer)
+    parts = re.split(r"(?<=[。！？!?；;])\s+|\n+", normalized)
+    return [part.strip() for part in parts if part.strip()]
+
+
+def _split_relation_clauses(sentence: str) -> list[str]:
+    normalized = normalize_whitespace(sentence)
+    if "，" not in normalized and "," not in normalized:
+        return [normalized]
+    delimiter = "，" if "，" in normalized else ","
+    parts = [part.strip() for part in normalized.split(delimiter) if part.strip()]
+    if len(parts) <= 1:
+        return [normalized]
+    if any(_looks_like_relation_claim(part) for part in parts):
+        return parts
+    return [normalized]
+
+
+def required_scope_terms(question: str) -> list[str]:
+    text = normalize_whitespace(question)
+    terms: list[str] = []
+    for match in re.finditer(r"([\u4e00-\u9fffA-Za-z0-9_.-]{2,})的[^？?。；;]*(?:是谁|是什么|有哪些|多少|几个|哪|who|what|which)", text, flags=re.IGNORECASE):
+        candidate = match.group(1).strip()
+        if _is_valid_query_term(candidate):
+            terms.append(candidate)
+    return dedupe_preserve_order(terms)
+
+
+def missing_required_scope_terms(question: str, hits: list[RetrievalHit]) -> list[str]:
+    terms = required_scope_terms(question)
+    if not terms:
+        return []
+    haystack = "\n".join(f"{hit.title}\n{hit.citation}\n{hit.text}" for hit in hits).casefold()
+    return [term for term in terms if term.casefold() not in haystack]
+
+
+def _term_in_spans(term: str, span_ids: list[str], span_by_id: dict[str, SupportSpan]) -> bool:
+    normalized_term = term.casefold()
+    return any(normalized_term in span_by_id[span_id].text.casefold() for span_id in span_ids if span_id in span_by_id)
+
+
+def _is_missing_evidence_statement(claim: str) -> bool:
+    normalized = claim.casefold()
+    return any(cue.casefold() in normalized for cue in MISSING_EVIDENCE_CUES)
+
+
+def _looks_like_relation_claim(claim: str) -> bool:
+    normalized = claim.casefold()
+    return any(cue.casefold() in normalized for cue in CLAIM_RELATION_CUES)
+
+
+def claim_key_terms(claim: str) -> list[str]:
+    clean = re.sub(r"\[(?:S)?\d+\]", " ", claim, flags=re.IGNORECASE)
+    terms: list[str] = []
+    for match in re.finditer(r"[a-z0-9][a-z0-9_.-]{1,}", clean.casefold()):
+        term = match.group(0).strip("_.-")
+        if _is_valid_claim_term(term):
+            terms.append(term)
+    for match in re.finditer(r"[一-鿿]{2,}", clean):
+        chunk = match.group(0)
+        parts = [part for part in re.split(r"[，。；、,/的和与及\s]+", chunk) if part]
+        for part in parts:
+            if _is_valid_claim_term(part):
+                terms.append(part)
+    return dedupe_preserve_order(terms)
+
+
+def _is_valid_claim_term(term: str) -> bool:
+    term = term.strip()
+    return bool(
+        term
+        and len(term) >= 2
+        and term.casefold() not in STOP_QUERY_TERMS
+        and term not in CLAIM_TOKEN_STOPWORDS
+        and term not in RELATION_TERMS_FOR_REMOVAL
+        and term not in PRONOUN_QUERY_TERMS
+    )
 
 
 def _chat_completions_url(base_url: str) -> str:
@@ -825,7 +1246,7 @@ def _prefix_kb_fallback_answer(question: str, answer: str) -> str:
 
 
 def _looks_chinese(value: str) -> bool:
-    return bool(re.search(r"[\u4e00-\u9fff]", value))
+    return bool(re.search(r"[一-鿿]", value))
 
 
 def refusal_answer_for(grounding: AnswerabilityResult) -> str:
@@ -833,6 +1254,8 @@ def refusal_answer_for(grounding: AnswerabilityResult) -> str:
         return INSUFFICIENT_CAUSAL_EVIDENCE
     if grounding.reason == "insufficient_exact_evidence":
         return INSUFFICIENT_EXACT_EVIDENCE
+    if grounding.reason == "missing_required_query_scope":
+        return INSUFFICIENT_SCOPE_EVIDENCE
     return NO_EVIDENCE_ANSWER
 
 
@@ -883,7 +1306,7 @@ def matched_causal_evidence_cues(question: str, hits: list[RetrievalHit]) -> lis
     for hit in hits:
         for sentence in split_evidence_sentences(hit.text):
             normalized_sentence = sentence.casefold()
-            if query_terms and not any(term in normalized_sentence for term in query_terms):
+            if query_terms and not any(term.casefold() in normalized_sentence for term in query_terms):
                 continue
             for cue in CAUSAL_EVIDENCE_CUES:
                 if cue.casefold() in normalized_sentence and cue not in seen:
@@ -938,7 +1361,7 @@ def extract_query_terms(question: str) -> list[str]:
         term = match.group(0).strip("_.-")
         if _is_valid_query_term(term):
             terms.append(term)
-    for match in re.finditer(r"[\u4e00-\u9fff]{2,}", normalized):
+    for match in re.finditer(r"[一-鿿]{2,}", normalized):
         chunk = match.group(0)
         parts = [part for part in re.split(r"[和与及、，,/的]+", chunk) if part]
         if len(parts) > 1:
