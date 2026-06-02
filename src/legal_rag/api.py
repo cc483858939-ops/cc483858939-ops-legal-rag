@@ -18,7 +18,12 @@ from legal_rag.evidence import (
 )
 from legal_rag.factory import build_retriever, build_rewriter, build_store
 from legal_rag.ingest import ingest_manifest
-from legal_rag.llm_answer import GeneralKnowledgeAnswerer, LLMAnswerConfig, OpenAICompatibleAnswerer
+from legal_rag.llm_answer import (
+    GeneralKnowledgeAnswerer,
+    LLMAnswerConfig,
+    OpenAICompatibleAnswerer,
+    answer_result_indicates_insufficient_evidence,
+)
 from legal_rag.metadata_filter import normalize_metadata_filters
 from legal_rag.observability import TraceCollector
 from legal_rag.query_intent import (
@@ -29,11 +34,13 @@ from legal_rag.query_intent import (
     response_for_intent,
 )
 from legal_rag.query_rewrite import build_query_extensions
-from legal_rag.relevance import EvidenceRelevanceGate, no_relevant_answer
+from legal_rag.relevance import EvidenceRelevanceGate, filter_relevant_hits, no_relevant_answer
 
 app = FastAPI(title="legal-rag", version="0.1.0")
 WEB_DIR = Path(__file__).resolve().parent / "web"
 app.mount("/static", StaticFiles(directory=WEB_DIR), name="static")
+DEFAULT_LLM_TIMEOUT_SECONDS = 45.0
+THINKING_LLM_TIMEOUT_SECONDS = 180.0
 
 
 class RetrieveRequest(BaseModel):
@@ -63,7 +70,8 @@ class LLMRequestConfig(BaseModel):
     model: str
     temperature: float = Field(default=0.2, ge=0.0, le=2.0)
     max_tokens: int = Field(default=700, ge=64, le=4000)
-    timeout_seconds: float = Field(default=45.0, ge=1.0, le=180.0)
+    timeout_seconds: float = Field(default=DEFAULT_LLM_TIMEOUT_SECONDS, ge=1.0, le=180.0)
+    thinking_enabled: bool = False
 
 
 class AnswerRequest(EvidenceRequest):
@@ -214,8 +222,7 @@ def answer(request: AnswerRequest):
                 response["retrieval_status"] = (
                     "model_fallback" if should_fallback_to_model else "model_answer"
                 )
-                if should_generate_general:
-                    response["answer_source"] = "model"
+                response["answer_source"] = "model"
                 trace.end_stage(
                     request_stage,
                     {
@@ -261,6 +268,15 @@ def answer(request: AnswerRequest):
                 "citation_count": len(answer_result.get("citations") or []),
             },
         )
+        if _should_post_answer_fallback(response, answer_result):
+            answer_result = _generate_general_answer(
+                request,
+                llm_config=llm_config,
+                trace=trace,
+                fallback_from_kb=True,
+            )
+            response["retrieval_status"] = "model_fallback"
+            response["answer_source"] = "model"
         response["answer"] = answer_result
         trace.end_stage(
             request_stage,
@@ -391,12 +407,18 @@ def _run_evidence_pipeline(
             "input_count": len(hits),
         },
     )
-    relevance = EvidenceRelevanceGate().evaluate(request.query, hits)
+    candidate_hits = hits
+    relevance = EvidenceRelevanceGate().evaluate(request.query, candidate_hits)
     trace.end_stage(relevance_stage, relevance.as_dict())
     if not relevance.relevant:
         pack_stage = trace.start_stage(
             "evidence_pack",
-            {"hit_count": 0, "top_k": request.top_k, "retrieval_status": relevance.retrieval_status},
+            {
+                "candidate_hit_count": len(candidate_hits),
+                "hit_count": 0,
+                "top_k": request.top_k,
+                "retrieval_status": relevance.retrieval_status,
+            },
         )
         response = build_evidence_pack(
             request.query,
@@ -413,14 +435,21 @@ def _run_evidence_pipeline(
             route=intent.as_dict(),
             retrieval_status=relevance.retrieval_status,
             relevance=relevance.as_dict(),
+            candidate_hit_count=len(candidate_hits),
+            relevant_hit_count=0,
         )
         response["answer"] = no_relevant_answer(request.query, relevance)
         trace.end_stage(pack_stage, {"hit_count": 0, "hits": []})
         return response, [], reranker_summary
 
+    hits = filter_relevant_hits(request.query, candidate_hits, relevance)
     pack_stage = trace.start_stage(
         "evidence_pack",
-        {"hit_count": len(hits), "top_k": request.top_k},
+        {
+            "candidate_hit_count": len(candidate_hits),
+            "hit_count": len(hits),
+            "top_k": request.top_k,
+        },
     )
     response = build_evidence_pack(
         request.query,
@@ -437,6 +466,8 @@ def _run_evidence_pipeline(
         route=intent.as_dict(),
         retrieval_status=relevance.retrieval_status,
         relevance=relevance.as_dict(),
+        candidate_hit_count=len(candidate_hits),
+        relevant_hit_count=len(hits),
     )
     trace.end_stage(
         pack_stage,
@@ -507,9 +538,60 @@ def _non_retrieval_response(
         "mode": request.mode,
         "top_k": request.top_k,
         "hit_count": 0,
+        "candidate_hit_count": 0,
+        "relevant_hit_count": 0,
         "hits": [],
         "answer": answer,
     }
+
+
+def _should_post_answer_fallback(response: dict[str, Any], answer_result: dict[str, Any]) -> bool:
+    return (
+        response.get("allow_model_fallback") is True
+        and response.get("kb_required") is not True
+        and response.get("requires_clarification") is not True
+        and not _has_grounded_kb_match(response, answer_result)
+        and answer_result_indicates_insufficient_evidence(answer_result)
+    )
+
+
+def _has_grounded_kb_match(response: dict[str, Any], answer_result: dict[str, Any]) -> bool:
+    if response.get("retrieval_status") != "retrieved":
+        return False
+    try:
+        hit_count = int(response.get("hit_count") or 0)
+    except (TypeError, ValueError):
+        hit_count = 0
+    if hit_count <= 0:
+        return False
+
+    grounding = answer_result.get("grounding") if isinstance(answer_result, dict) else None
+    matched_cues = grounding.get("matched_cues") if isinstance(grounding, dict) else None
+    answer_mode = str(grounding.get("answer_mode") or "") if isinstance(grounding, dict) else ""
+    if answer_result_indicates_insufficient_evidence(answer_result):
+        if answer_mode == "contextual_definition" and isinstance(matched_cues, list) and any(
+            str(item).strip() for item in matched_cues
+        ):
+            return True
+        relevance = response.get("relevance")
+        matched_terms = relevance.get("matched_terms") if isinstance(relevance, dict) else None
+        reason = relevance.get("reason") if isinstance(relevance, dict) else None
+        return (
+            reason == "query_term_overlap"
+            and isinstance(matched_terms, list)
+            and any(str(item).strip() for item in matched_terms)
+        )
+    if isinstance(matched_cues, list) and any(str(item).strip() for item in matched_cues):
+        return True
+
+    relevance = response.get("relevance")
+    matched_terms = relevance.get("matched_terms") if isinstance(relevance, dict) else None
+    reason = relevance.get("reason") if isinstance(relevance, dict) else None
+    return (
+        reason == "query_term_overlap"
+        and isinstance(matched_terms, list)
+        and any(str(item).strip() for item in matched_terms)
+    )
 
 
 def _generate_general_answer(
@@ -546,6 +628,9 @@ def _generate_general_answer(
 
 
 def _llm_config_from_request(config: LLMRequestConfig) -> LLMAnswerConfig:
+    timeout_seconds = config.timeout_seconds
+    if config.thinking_enabled:
+        timeout_seconds = max(timeout_seconds, THINKING_LLM_TIMEOUT_SECONDS)
     return LLMAnswerConfig(
         provider=config.provider,
         base_url=config.base_url,
@@ -553,5 +638,6 @@ def _llm_config_from_request(config: LLMRequestConfig) -> LLMAnswerConfig:
         api_key=config.api_key,
         temperature=config.temperature,
         max_tokens=config.max_tokens,
-        timeout_seconds=config.timeout_seconds,
+        timeout_seconds=timeout_seconds,
+        thinking_enabled=config.thinking_enabled,
     )

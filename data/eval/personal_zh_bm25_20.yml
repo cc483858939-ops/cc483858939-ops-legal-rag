@@ -118,3 +118,21 @@ queries:
     expected_terms: ["沉淀知识", "更新笔记", "整理主题", "形成长期记忆"]
     category: personal_kb
     tags: ["real_user", "broad"]
+  - id: zh-real-song-context-definition
+    query: "打火机是什么"
+    expected_terms: ["炫神", "最喜欢的歌", "打火机"]
+    category: song
+    tags: ["real_user", "context_definition", "regression"]
+
+  - id: zh-general-color-domain-fallback
+    query: "灰度域和彩色域是什么"
+    expected_terms: ["灰度", "彩色", "图像"]
+    category: general_knowledge
+    tags: ["real_user", "kb_miss", "model_fallback", "regression"]
+
+  - id: zh-real-showmaker-achievement-compound
+    query: "英雄联盟世界第一中单是谁，他有什么成就"
+    expected_terms: ["ShowMaker", "世界第一中单", "重铸LCK荣光我辈义不容辞"]
+    forbidden_claim_patterns: ["ShowMaker.{0,12}(又被称为|又称|也叫|也称|别名).{0,12}(炫神|炫狗)", "ShowMaker.{0,20}(冠军|数据|荣誉)"]
+    category: compound_factual
+    tags: ["real_user", "entity_binding", "partial_answer", "regression"]

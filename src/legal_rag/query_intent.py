@@ -392,7 +392,7 @@ def build_intent_router(settings: Any) -> QueryIntentRouter:
                 getattr(
                     settings,
                     "intent_router_model",
-                    getattr(settings, "query_rewrite_model", "gemma4:e2b"),
+                    getattr(settings, "query_rewrite_model", "qwen3.5:9b"),
                 )
             ),
             timeout_seconds=float(getattr(settings, "intent_router_timeout_seconds", 60.0)),

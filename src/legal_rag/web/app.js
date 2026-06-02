@@ -1,12 +1,15 @@
 const STORAGE_KEY = "legal-rag-evidence-chat-v1";
 const LLM_CONFIG_KEY = "legal-rag-llm-config-v1";
 const ANSWER_MODE_VERSION = 2;
+const DEFAULT_LLM_PRESET = "ollama-qwen35";
+const DEFAULT_LLM_TIMEOUT_SECONDS = 45;
+const THINKING_LLM_TIMEOUT_SECONDS = 180;
 
 const LLM_PRESETS = {
-  "ollama-gemma4": {
+  "ollama-qwen35": {
     provider: "openai_compatible",
     baseUrl: "http://ollama:11434/v1",
-    model: "gemma4:e2b",
+    model: "qwen3.5:9b",
   },
   "deepseek-chat": {
     provider: "openai_compatible",
@@ -70,6 +73,7 @@ const els = {
   llmApiKey: document.querySelector("#llmApiKey"),
   llmTemperature: document.querySelector("#llmTemperature"),
   llmMaxTokens: document.querySelector("#llmMaxTokens"),
+  thinkingToggle: document.querySelector("#thinkingToggle"),
   questionInput: document.querySelector("#questionInput"),
   queryForm: document.querySelector("#queryForm"),
   sendBtn: document.querySelector("#sendBtn"),
@@ -116,8 +120,24 @@ function saveLLMConfig() {
     model: els.llmModel.value.trim(),
     temperature: Number(els.llmTemperature.value || 0.2),
     maxTokens: Number(els.llmMaxTokens.value || 700),
+    thinkingEnabled: isThinkingEnabled(),
+    timeoutSeconds: answerTimeoutSeconds(),
   };
   window.localStorage.setItem(LLM_CONFIG_KEY, JSON.stringify(config));
+}
+
+function normalizeLLMPreset(preset) {
+  if (preset === "ollama-gemma4") return DEFAULT_LLM_PRESET;
+  return LLM_PRESETS[preset] ? preset : DEFAULT_LLM_PRESET;
+}
+
+function migrateLegacyLLMConfig(config) {
+  const normalizedPreset = normalizeLLMPreset(config.preset || DEFAULT_LLM_PRESET);
+  if (normalizedPreset !== config.preset) {
+    const preset = LLM_PRESETS[normalizedPreset];
+    return { ...config, preset: normalizedPreset, baseUrl: preset.baseUrl, model: preset.model };
+  }
+  return { ...config, preset: normalizedPreset };
 }
 
 function escapeHtml(value) {
@@ -229,7 +249,7 @@ function renderEvidencePack(pack) {
     return `${renderRouteDebug(pack)}${renderGeneratedAnswer(pack.answer)}`;
   }
   const count = Number(pack.hit_count || 0);
-  const summary =
+  let summary =
     pack.retrieval_status === "model_fallback"
       ? "个人库未命中，模型通用知识回答"
       : pack.retrieval_status === "model_answer"
@@ -243,6 +263,7 @@ function renderEvidencePack(pack) {
       : count > 0
         ? `找到 ${count} 条相关证据`
         : "没有找到相关证据";
+  summary = packSummaryLabel(pack);
   return `
     <div class="pack-heading">
       <div>
@@ -266,6 +287,34 @@ function renderEvidencePack(pack) {
   `;
 }
 
+function packSummaryLabel(pack) {
+  const relevantCount = Number(pack.relevant_hit_count ?? pack.hit_count ?? 0);
+  const candidateCount = Number(pack.candidate_hit_count ?? pack.hit_count ?? 0);
+  if (pack.retrieval_status === "model_fallback") {
+    return "个人库未命中，模型按通识回答";
+  }
+  if (pack.retrieval_status === "model_answer") {
+    return "模型通识回答";
+  }
+  if (pack.retrieval_status === "no_relevant_evidence" && pack.kb_required) {
+    return candidateCount > 0
+      ? `严格知识库问题，${candidateCount} 条候选均无直接证据`
+      : "严格知识库问题，证据不足";
+  }
+  if (pack.retrieval_status === "no_relevant_evidence") {
+    return candidateCount > 0
+      ? `个人库返回 ${candidateCount} 条候选，未发现相关证据`
+      : "知识库没有找到直接相关材料";
+  }
+  if (relevantCount > 0 && pack.answer_source === "personal_kb") {
+    return `个人库命中 ${relevantCount} 条相关证据`;
+  }
+  if (candidateCount > 0) {
+    return `个人库返回 ${candidateCount} 条候选`;
+  }
+  return "没有找到相关证据";
+}
+
 function renderGeneratedAnswer(answer) {
   if (!answer) return "";
   const llm = answer.llm || {};
@@ -285,7 +334,7 @@ function renderGeneratedAnswer(answer) {
         llm_refused: "模型未能回答",
         error: "回答模型调用失败",
       }[status] || "模型回答";
-  const content = answer.answer || answer.error || "模型没有返回可展示内容。";
+  const content = answer.answer || answerErrorMessage(answer);
   const citations = Array.isArray(answer.citations) ? answer.citations : [];
   return `
     <section class="answer-panel ${answer.error ? "answer-error" : ""} answer-status-${escapeHtml(status)}">
@@ -306,6 +355,19 @@ function renderGeneratedAnswer(answer) {
   `;
 }
 
+function answerErrorMessage(answer) {
+  if (answer?.reason === "empty_model_response") {
+    return "模型只返回了思考内容或空正文，系统未拿到可展示答案。";
+  }
+  const error = String(answer?.error || "");
+  if (error.includes("ReadTimeout")) {
+    return Number(answer?.retry_count || 0) > 0
+      ? "模型生成超时，已尝试关闭 Thinking 重试；仍失败请关闭 Thinking 或稍后重试。"
+      : "模型生成超时，请关闭 Thinking 或稍后重试。";
+  }
+  return error || "模型没有返回可展示内容。";
+}
+
 function renderRouteDebug(pack) {
   if (!pack || !pack.intent) return "";
   return `
@@ -322,6 +384,8 @@ function renderRouteDebug(pack) {
         <p><span>Domain</span>${escapeHtml(pack.domain || "unknown")}</p>
         <p><span>Query type</span>${escapeHtml(pack.query_type || "unknown")}</p>
         <p><span>Strategy</span>${escapeHtml(pack.retrieval_strategy || "hybrid")}</p>
+        <p><span>Candidates</span>${escapeHtml(pack.candidate_hit_count ?? pack.hit_count ?? 0)}</p>
+        <p><span>Relevant</span>${escapeHtml(pack.relevant_hit_count ?? pack.hit_count ?? 0)}</p>
         <p><span>Priority</span>${escapeHtml(pack.intent_priority_reason || pack.intent_reason || "--")}</p>
         <p><span>Source</span>${escapeHtml(pack.intent_source || "--")}</p>
         ${pack.requires_clarification ? `<p><span>Clarify</span>${escapeHtml(pack.clarification_question || "")}</p>` : ""}
@@ -599,6 +663,8 @@ function collectLLMConfig() {
     model: els.llmModel.value.trim(),
     temperature: Number(els.llmTemperature.value || 0.2),
     max_tokens: Number(els.llmMaxTokens.value || 700),
+    thinking_enabled: isThinkingEnabled(),
+    timeout_seconds: answerTimeoutSeconds(),
   };
 }
 
@@ -717,29 +783,51 @@ function initControls() {
 }
 
 function initLLMControls() {
-  const config = state.llmConfig;
+  const config = migrateLegacyLLMConfig(state.llmConfig);
+  state.llmConfig = config;
   if (
-    (config.preset || "ollama-gemma4") === "ollama-gemma4" &&
+    (config.preset || DEFAULT_LLM_PRESET) === DEFAULT_LLM_PRESET &&
     config.baseUrl === "http://host.docker.internal:11434/v1"
   ) {
-    config.baseUrl = LLM_PRESETS["ollama-gemma4"].baseUrl;
+    config.baseUrl = LLM_PRESETS[DEFAULT_LLM_PRESET].baseUrl;
   }
   els.answerEnabled.checked = config.enabled !== false;
-  els.llmPreset.value = config.preset || "ollama-gemma4";
+  els.llmPreset.value = config.preset || DEFAULT_LLM_PRESET;
   applyLLMPreset({ preserveCustom: true });
   if (config.baseUrl) els.llmBaseUrl.value = config.baseUrl;
   if (config.model) els.llmModel.value = config.model;
   if (config.temperature !== undefined) els.llmTemperature.value = config.temperature;
   if (config.maxTokens !== undefined) els.llmMaxTokens.value = config.maxTokens;
+  setThinkingEnabled(config.thinkingEnabled === true);
 
   els.llmPreset.addEventListener("change", () => {
     applyLLMPreset();
+    saveLLMConfig();
+  });
+  els.thinkingToggle.addEventListener("click", () => {
+    setThinkingEnabled(!isThinkingEnabled());
     saveLLMConfig();
   });
   [els.answerEnabled, els.llmBaseUrl, els.llmModel, els.llmTemperature, els.llmMaxTokens].forEach((item) => {
     item.addEventListener("input", saveLLMConfig);
     item.addEventListener("change", saveLLMConfig);
   });
+}
+
+function isThinkingEnabled() {
+  return els.thinkingToggle?.getAttribute("aria-pressed") === "true";
+}
+
+function setThinkingEnabled(enabled) {
+  if (!els.thinkingToggle) return;
+  els.thinkingToggle.setAttribute("aria-pressed", enabled ? "true" : "false");
+  els.thinkingToggle.title = enabled
+    ? `回答时启用模型思考，超时上限 ${THINKING_LLM_TIMEOUT_SECONDS} 秒`
+    : "回答时启用模型思考";
+}
+
+function answerTimeoutSeconds() {
+  return isThinkingEnabled() ? THINKING_LLM_TIMEOUT_SECONDS : DEFAULT_LLM_TIMEOUT_SECONDS;
 }
 
 function applyLLMPreset({ preserveCustom = false } = {}) {

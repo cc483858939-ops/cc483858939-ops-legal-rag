@@ -48,3 +48,45 @@ def test_relevance_keeps_strict_kb_scope_out_of_entity_terms() -> None:
 
 def test_relevance_does_not_treat_ambiguous_pronoun_as_entity() -> None:
     assert matched_query_terms("那他是谁", [personal_note_hit()]) == []
+
+def test_relevance_does_not_accept_bm25_only_for_unrelated_chinese_definition() -> None:
+    hit = RetrievalHit(
+        chunk_id="unrelated-1",
+        source_id="personal-test-note",
+        doc_type="note",
+        title="Personal Test Note",
+        citation="Personal Test Note v1",
+        jurisdiction="PERSONAL",
+        text="个人知识库助手会记录记忆分类、RAG 指标、ShowMaker 和炫神的个人测试描述。",
+        fusion_score=0.05,
+        dense_score=0.0,
+        bm25_score=3.2,
+    )
+
+    decision = EvidenceRelevanceGate().evaluate("灰度域和彩色域是什么", [hit])
+
+    assert decision.relevant is False
+    assert decision.reason == "below_relevance_threshold"
+    assert decision.top_bm25_score == 3.2
+    assert decision.candidate_hit_count == 1
+    assert decision.relevant_hit_count == 0
+
+
+def test_relevance_uses_meaningful_chinese_token_overlap_when_full_phrase_differs() -> None:
+    hit = RetrievalHit(
+        chunk_id="song-1",
+        source_id="personal-test-note",
+        doc_type="note",
+        title="Personal Test Note",
+        citation="Personal Test Note v1",
+        jurisdiction="PERSONAL",
+        text="打火机歌词里有一句：吉隆坡的天气，他是翻云又覆雨。",
+        fusion_score=0.05,
+        dense_score=0.0,
+        bm25_score=0.0,
+    )
+
+    terms = matched_query_terms("吉隆坡天气那句歌词后面是什么", [hit])
+
+    assert "天气" in terms or "歌词" in terms
+    assert EvidenceRelevanceGate().evaluate("吉隆坡天气那句歌词后面是什么", [hit]).relevant is True

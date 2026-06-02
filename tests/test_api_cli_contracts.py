@@ -49,6 +49,30 @@ def route_result(**overrides) -> QueryIntentResult:
     return QueryIntentResult.model_validate(data)
 
 
+def fake_settings(tmp_path, trace_name: str = "traces.json"):
+    class FakeSettings:
+        query_extension_min_similarity = 0.0
+        trace_enabled = True
+        trace_path = str(tmp_path / trace_name)
+        trace_retention_count = 10
+        trace_include_text = False
+        trace_text_chars = 300
+        trace_max_items_per_stage = 20
+        qdrant_collection = "personal_test"
+        store_backend = "qdrant"
+        corpus_manifest = "configs/personal_test_sources.yml"
+        candidate_pool = 1
+        dense_weight = 0.55
+        bm25_weight = 0.45
+        rrf_k = 60
+        reranker_model = None
+        rerank_top_n = 20
+        inferred_metadata_filters_enabled = True
+        query_rewrite_filter_min_confidence = 0.55
+
+    return FakeSettings()
+
+
 def test_schema_contracts_allow_planned_fields() -> None:
     case = EvalCase(
         id="x",
@@ -102,6 +126,8 @@ def test_evidence_pack_formats_ranked_hits() -> None:
     assert pack["mode"] == "hybrid"
     assert pack["top_k"] == 1
     assert pack["hit_count"] == 1
+    assert pack["candidate_hit_count"] == 1
+    assert pack["relevant_hit_count"] == 1
     assert pack["hits"][0]["rank"] == 1
     assert pack["hits"][0]["snippet"].endswith("...")
     assert len(pack["hits"][0]["snippet"]) <= 300
@@ -225,6 +251,8 @@ def test_evidence_endpoint_uses_retriever(monkeypatch, tmp_path) -> None:
     }
     assert data["mode"] == "bm25"
     assert data["hit_count"] == 1
+    assert data["retrieval_status"] == "retrieved"
+    assert data["answer_source"] == "personal_kb"
     assert fake_retriever.queries == ["notice", "Federal Register notice", "Federal Register"]
     assert all(
         item == {"doc_type": ["statute"], "jurisdiction": ["US"]}
@@ -386,6 +414,7 @@ def test_answer_endpoint_adds_llm_answer(monkeypatch, tmp_path) -> None:
                 "base_url": "https://api.example.com/v1",
                 "api_key": "secret",
                 "model": "example-model",
+                "thinking_enabled": True,
             },
         },
     )
@@ -400,6 +429,8 @@ def test_answer_endpoint_adds_llm_answer(monkeypatch, tmp_path) -> None:
     assert data["answer"]["grounding"]["answer_mode"] == "direct"
     assert data["answer"]["grounding"]["missing_evidence"] == []
     assert data["answer"]["llm"]["model"] == "example-model"
+    assert data["answer"]["llm"]["thinking_enabled"] is True
+    assert data["answer"]["llm"]["timeout_seconds"] == 180.0
     assert data["answer"]["llm"]["api_key_configured"] is True
     assert "secret" not in json.dumps(data, ensure_ascii=False)
     traces = json.loads((tmp_path / "answer_traces.json").read_text(encoding="utf-8"))
@@ -1112,14 +1143,526 @@ def test_answer_endpoint_falls_back_to_model_when_personal_kb_has_no_relevant_ev
 
     assert response.status_code == 200
     data = response.json()
-    assert data["answer_source"] == "personal_kb"
+    assert data["answer_source"] == "model"
     assert data["allow_model_fallback"] is True
     assert data["retrieval_status"] == "model_fallback"
     assert data["hit_count"] == 0
+    assert data["candidate_hit_count"] == 1
+    assert data["relevant_hit_count"] == 0
     assert data["hits"] == []
     assert data["answer"]["answer_status"] == "model_fallback"
     assert data["answer"]["citations"] == []
     assert data["answer"]["answer"].startswith("个人知识库没有找到直接相关内容")
+
+
+def test_answer_endpoint_post_answer_fallbacks_when_retrieved_hits_do_not_answer(
+    monkeypatch, tmp_path
+) -> None:
+    query = "爱因斯坦是谁"
+
+    class FakeRetriever:
+        candidate_pool = 1
+
+        def retrieve(self, query: str, *, top_k: int, mode: str, filters=None, **kwargs):
+            return [
+                RetrievalHit(
+                    chunk_id="1",
+                    source_id="personal-test",
+                    doc_type="note",
+                    title="Personal Test Note",
+                    citation="Personal Test Note v1",
+                    jurisdiction="PERSONAL",
+                    text="炫神最喜欢的歌是打火机。",
+                    dense_score=0.0,
+                    bm25_score=1.0,
+                    fusion_score=0.5,
+                )
+            ]
+
+    class FakeStore:
+        embedder = MappingEmbedder({query: [1.0, 0.0]})
+
+    class FakeRewriter:
+        def rewrite(self, query: str):
+            return QueryRewriteResult(original_query=query, retrieval_query=query)
+
+    class FakeRouter:
+        def route(self, query: str, **kwargs):
+            return route_result(
+                need_retrieval=True,
+                intent="answer_question",
+                domain="personal_kb",
+                query_type="factual",
+                retrieval_strategy="hybrid",
+                answer_source="personal_kb",
+                kb_required=False,
+                allow_model_fallback=True,
+                confidence=0.94,
+                priority_reason="kb_first",
+            )
+
+    class FakeAnswerer:
+        def __init__(self, config) -> None:
+            self.config = config
+
+        def generate(self, question: str, hits: list[RetrievalHit]):
+            assert question == query
+            return {
+                "enabled": True,
+                "skipped": False,
+                "reason": None,
+                "refused": False,
+                "answer_status": "answered",
+                "answer": "根据现有材料来看，没有关于爱因斯坦的信息。",
+                "citations": [{"rank": 1, "title": hits[0].title, "citation": hits[0].citation}],
+                "grounding": {
+                    "question_type": "factual",
+                    "answerable": True,
+                    "checked_hit_count": len(hits),
+                    "required_evidence": "直接回答问题的检索证据",
+                    "answer_mode": "direct",
+                    "matched_cues": [],
+                    "missing_evidence": [],
+                },
+                "llm": self.config.safe_dict(),
+                "usage": None,
+                "duration_ms": 1.0,
+                "error": None,
+            }
+
+    class FakeGeneralAnswerer:
+        def __init__(self, config) -> None:
+            self.config = config
+
+        def generate(self, question: str, *, fallback_from_kb: bool = False, kb_required: bool = False):
+            assert question == query
+            assert fallback_from_kb is True
+            assert kb_required is False
+            return {
+                "enabled": True,
+                "skipped": False,
+                "reason": "kb_no_relevant_evidence",
+                "refused": False,
+                "answer_status": "model_fallback",
+                "answer": "个人知识库没有找到直接相关内容；根据一般常识，爱因斯坦是物理学家。",
+                "citations": [],
+                "grounding": {
+                    "question_type": "factual",
+                    "answerable": True,
+                    "checked_hit_count": 0,
+                    "required_evidence": "模型通用知识；不使用个人知识库引用",
+                    "answer_mode": "general_knowledge_fallback",
+                    "matched_cues": [],
+                    "missing_evidence": ["personal_kb_evidence"],
+                },
+                "llm": self.config.safe_dict(),
+                "usage": None,
+                "duration_ms": 1.0,
+                "error": None,
+            }
+
+    import legal_rag.api as api_module
+
+    monkeypatch.setattr(
+        api_module,
+        "runtime",
+        lambda: (
+            fake_settings(tmp_path, "post_answer_fallback_traces.json"),
+            FakeStore(),
+            FakeRetriever(),
+            None,
+            FakeRewriter(),
+        ),
+    )
+    monkeypatch.setattr(api_module, "build_intent_router", lambda settings: FakeRouter())
+    monkeypatch.setattr(api_module, "OpenAICompatibleAnswerer", FakeAnswerer)
+    monkeypatch.setattr(api_module, "GeneralKnowledgeAnswerer", FakeGeneralAnswerer)
+
+    client = TestClient(app)
+    response = client.post(
+        "/answer",
+        json={
+            "query": query,
+            "top_k": 1,
+            "mode": "hybrid",
+            "llm": {
+                "provider": "openai_compatible",
+                "base_url": "https://api.example.com/v1",
+                "model": "example-model",
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["retrieval_status"] == "model_fallback"
+    assert data["answer_source"] == "model"
+    assert data["allow_model_fallback"] is True
+    assert data["hit_count"] == 1
+    assert data["answer"]["answer_status"] == "model_fallback"
+    assert data["answer"]["citations"] == []
+    assert data["answer"]["answer"].startswith("个人知识库没有找到直接相关内容；根据一般常识，")
+
+
+def test_answer_endpoint_does_not_post_fallback_when_retrieved_hit_has_matched_kb_cue(
+    monkeypatch, tmp_path
+) -> None:
+    query = "打火机是什么"
+
+    class FakeRetriever:
+        candidate_pool = 1
+
+        def retrieve(self, query: str, *, top_k: int, mode: str, filters=None, **kwargs):
+            return [
+                RetrievalHit(
+                    chunk_id="1",
+                    source_id="personal-test",
+                    doc_type="note",
+                    title="Personal Test Note",
+                    citation="Personal Test Note v1",
+                    jurisdiction="PERSONAL",
+                    text="炫神最喜欢的歌是打火机。",
+                    dense_score=0.0,
+                    bm25_score=1.0,
+                    fusion_score=0.5,
+                )
+            ]
+
+    class FakeStore:
+        embedder = MappingEmbedder({query: [1.0, 0.0]})
+
+    class FakeRewriter:
+        def rewrite(self, query: str):
+            return QueryRewriteResult(original_query=query, retrieval_query=query)
+
+    class FakeRouter:
+        def route(self, query: str, **kwargs):
+            return route_result(
+                need_retrieval=True,
+                intent="answer_question",
+                domain="personal_kb",
+                query_type="definition",
+                retrieval_strategy="hybrid",
+                answer_source="personal_kb",
+                kb_required=False,
+                allow_model_fallback=True,
+                confidence=0.94,
+                priority_reason="kb_first",
+            )
+
+    class FakeAnswerer:
+        def __init__(self, config) -> None:
+            self.config = config
+
+        def generate(self, question: str, hits: list[RetrievalHit]):
+            assert question == query
+            return {
+                "enabled": True,
+                "skipped": False,
+                "reason": None,
+                "refused": False,
+                "answer_status": "answered",
+                "answer": "根据现有材料来看，没有关于“打火机”的定义。",
+                "citations": [{"rank": 1, "title": hits[0].title, "citation": hits[0].citation}],
+                "grounding": {
+                    "question_type": "definition",
+                    "answerable": True,
+                    "checked_hit_count": len(hits),
+                    "required_evidence": "实体在知识库语境中的描述、属性或关系证据",
+                    "answer_mode": "contextual_definition",
+                    "matched_cues": ["打火机"],
+                    "missing_evidence": [],
+                },
+                "llm": self.config.safe_dict(),
+                "usage": None,
+                "duration_ms": 1.0,
+                "error": None,
+            }
+
+    class FakeGeneralAnswerer:
+        def __init__(self, config) -> None:
+            self.config = config
+
+        def generate(self, *args, **kwargs):
+            raise AssertionError("matched KB evidence must not fall back to model")
+
+    import legal_rag.api as api_module
+
+    monkeypatch.setattr(
+        api_module,
+        "runtime",
+        lambda: (
+            fake_settings(tmp_path, "matched_kb_no_post_fallback_traces.json"),
+            FakeStore(),
+            FakeRetriever(),
+            None,
+            FakeRewriter(),
+        ),
+    )
+    monkeypatch.setattr(api_module, "build_intent_router", lambda settings: FakeRouter())
+    monkeypatch.setattr(api_module, "OpenAICompatibleAnswerer", FakeAnswerer)
+    monkeypatch.setattr(api_module, "GeneralKnowledgeAnswerer", FakeGeneralAnswerer)
+
+    client = TestClient(app)
+    response = client.post(
+        "/answer",
+        json={
+            "query": query,
+            "top_k": 1,
+            "mode": "hybrid",
+            "llm": {
+                "provider": "openai_compatible",
+                "base_url": "https://api.example.com/v1",
+                "model": "example-model",
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["retrieval_status"] == "retrieved"
+    assert data["answer_source"] == "personal_kb"
+    assert data["allow_model_fallback"] is True
+    assert data["hit_count"] == 1
+    assert data["relevance"]["matched_terms"] == ["打火机"]
+    assert data["answer"]["answer_status"] == "answered"
+    assert data["answer"]["grounding"]["matched_cues"] == ["打火机"]
+    assert data["answer"]["answer"] == "根据现有材料来看，没有关于“打火机”的定义。"
+
+
+def test_answer_endpoint_does_not_post_fallback_for_strict_kb_question(
+    monkeypatch, tmp_path
+) -> None:
+    query = "我的笔记里爱因斯坦是谁"
+
+    class FakeRetriever:
+        candidate_pool = 1
+
+        def retrieve(self, query: str, *, top_k: int, mode: str, filters=None, **kwargs):
+            return [
+                RetrievalHit(
+                    chunk_id="1",
+                    source_id="personal-test",
+                    doc_type="note",
+                    title="Personal Test Note",
+                    citation="Personal Test Note v1",
+                    jurisdiction="PERSONAL",
+                    text="炫神最喜欢的歌是打火机。",
+                    dense_score=0.0,
+                    bm25_score=1.0,
+                    fusion_score=0.5,
+                )
+            ]
+
+    class FakeStore:
+        embedder = MappingEmbedder({query: [1.0, 0.0]})
+
+    class FakeRewriter:
+        def rewrite(self, query: str):
+            return QueryRewriteResult(original_query=query, retrieval_query=query)
+
+    class FakeRouter:
+        def route(self, query: str, **kwargs):
+            return route_result(
+                need_retrieval=True,
+                intent="answer_question",
+                domain="personal_kb",
+                query_type="factual",
+                retrieval_strategy="hybrid",
+                answer_source="personal_kb",
+                kb_required=True,
+                allow_model_fallback=False,
+                confidence=0.94,
+                priority_reason="kb_only",
+            )
+
+    class FakeAnswerer:
+        def __init__(self, config) -> None:
+            self.config = config
+
+        def generate(self, question: str, hits: list[RetrievalHit]):
+            return {
+                "enabled": True,
+                "skipped": False,
+                "reason": None,
+                "refused": False,
+                "answer_status": "answered",
+                "answer": "根据现有材料来看，没有关于爱因斯坦的信息。",
+                "citations": [{"rank": 1, "title": hits[0].title, "citation": hits[0].citation}],
+                "grounding": {
+                    "question_type": "factual",
+                    "answerable": True,
+                    "checked_hit_count": len(hits),
+                    "required_evidence": "直接回答问题的检索证据",
+                    "answer_mode": "direct",
+                    "matched_cues": [],
+                    "missing_evidence": [],
+                },
+                "llm": self.config.safe_dict(),
+                "usage": None,
+                "duration_ms": 1.0,
+                "error": None,
+            }
+
+    class FakeGeneralAnswerer:
+        def __init__(self, config) -> None:
+            self.config = config
+
+        def generate(self, *args, **kwargs):
+            raise AssertionError("strict KB questions must not fall back to the model")
+
+    import legal_rag.api as api_module
+
+    monkeypatch.setattr(
+        api_module,
+        "runtime",
+        lambda: (
+            fake_settings(tmp_path, "strict_post_answer_traces.json"),
+            FakeStore(),
+            FakeRetriever(),
+            None,
+            FakeRewriter(),
+        ),
+    )
+    monkeypatch.setattr(api_module, "build_intent_router", lambda settings: FakeRouter())
+    monkeypatch.setattr(api_module, "OpenAICompatibleAnswerer", FakeAnswerer)
+    monkeypatch.setattr(api_module, "GeneralKnowledgeAnswerer", FakeGeneralAnswerer)
+
+    client = TestClient(app)
+    response = client.post(
+        "/answer",
+        json={
+            "query": query,
+            "top_k": 1,
+            "mode": "hybrid",
+            "llm": {
+                "provider": "openai_compatible",
+                "base_url": "https://api.example.com/v1",
+                "model": "example-model",
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["retrieval_status"] == "retrieved"
+    assert data["answer_source"] == "personal_kb"
+    assert data["kb_required"] is True
+    assert data["allow_model_fallback"] is False
+    assert data["answer"]["answer_status"] == "answered"
+    assert data["answer"]["answer"] == "根据现有材料来看，没有关于爱因斯坦的信息。"
+
+
+def test_answer_endpoint_does_not_post_fallback_for_llm_error(monkeypatch, tmp_path) -> None:
+    query = "爱因斯坦是谁"
+
+    class FakeRetriever:
+        candidate_pool = 1
+
+        def retrieve(self, query: str, *, top_k: int, mode: str, filters=None, **kwargs):
+            return [
+                RetrievalHit(
+                    chunk_id="1",
+                    source_id="personal-test",
+                    doc_type="note",
+                    title="Personal Test Note",
+                    citation="Personal Test Note v1",
+                    jurisdiction="PERSONAL",
+                    text="炫神最喜欢的歌是打火机。",
+                    dense_score=0.0,
+                    bm25_score=1.0,
+                    fusion_score=0.5,
+                )
+            ]
+
+    class FakeStore:
+        embedder = MappingEmbedder({query: [1.0, 0.0]})
+
+    class FakeRewriter:
+        def rewrite(self, query: str):
+            return QueryRewriteResult(original_query=query, retrieval_query=query)
+
+    class FakeRouter:
+        def route(self, query: str, **kwargs):
+            return route_result(
+                need_retrieval=True,
+                intent="answer_question",
+                domain="personal_kb",
+                query_type="factual",
+                retrieval_strategy="hybrid",
+                answer_source="personal_kb",
+                kb_required=False,
+                allow_model_fallback=True,
+                confidence=0.94,
+                priority_reason="kb_first",
+            )
+
+    class FakeAnswerer:
+        def __init__(self, config) -> None:
+            self.config = config
+
+        def generate(self, question: str, hits: list[RetrievalHit]):
+            return {
+                "enabled": True,
+                "skipped": True,
+                "reason": "llm_error",
+                "refused": False,
+                "answer_status": "error",
+                "answer": "insufficient evidence",
+                "citations": [{"rank": 1, "title": hits[0].title, "citation": hits[0].citation}],
+                "grounding": {},
+                "llm": self.config.safe_dict(),
+                "usage": None,
+                "duration_ms": 1.0,
+                "error": "RuntimeError: boom",
+            }
+
+    class FakeGeneralAnswerer:
+        def __init__(self, config) -> None:
+            self.config = config
+
+        def generate(self, *args, **kwargs):
+            raise AssertionError("LLM errors must not be converted to model fallback")
+
+    import legal_rag.api as api_module
+
+    monkeypatch.setattr(
+        api_module,
+        "runtime",
+        lambda: (
+            fake_settings(tmp_path, "llm_error_no_fallback_traces.json"),
+            FakeStore(),
+            FakeRetriever(),
+            None,
+            FakeRewriter(),
+        ),
+    )
+    monkeypatch.setattr(api_module, "build_intent_router", lambda settings: FakeRouter())
+    monkeypatch.setattr(api_module, "OpenAICompatibleAnswerer", FakeAnswerer)
+    monkeypatch.setattr(api_module, "GeneralKnowledgeAnswerer", FakeGeneralAnswerer)
+
+    client = TestClient(app)
+    response = client.post(
+        "/answer",
+        json={
+            "query": query,
+            "top_k": 1,
+            "mode": "hybrid",
+            "llm": {
+                "provider": "openai_compatible",
+                "base_url": "https://api.example.com/v1",
+                "model": "example-model",
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["retrieval_status"] == "retrieved"
+    assert data["answer_source"] == "personal_kb"
+    assert data["allow_model_fallback"] is True
+    assert data["answer"]["answer_status"] == "error"
+    assert data["answer"]["reason"] == "llm_error"
 
 
 def test_evidence_endpoint_does_not_fallback_to_model_when_personal_kb_misses(
@@ -1203,6 +1746,8 @@ def test_evidence_endpoint_does_not_fallback_to_model_when_personal_kb_misses(
     assert data["allow_model_fallback"] is True
     assert data["retrieval_status"] == "no_relevant_evidence"
     assert data["hit_count"] == 0
+    assert data["candidate_hit_count"] == 1
+    assert data["relevant_hit_count"] == 0
     assert data["hits"] == []
     assert data["answer"]["answer_status"] == "refused"
     assert data["answer"]["reason"] == "no_relevant_evidence"
@@ -1308,6 +1853,8 @@ def test_answer_endpoint_refuses_strict_kb_low_relevance_without_fallback(monkey
     assert data["query_type"] == "evaluative"
     assert data["retrieval_status"] == "no_relevant_evidence"
     assert data["hit_count"] == 0
+    assert data["candidate_hit_count"] == 1
+    assert data["relevant_hit_count"] == 0
     assert data["hits"] == []
     assert data["answer"]["reason"] == "no_relevant_evidence"
     assert data["answer"]["answer"] == "知识库没有找到与这个问题直接相关的材料，不能可靠回答。"
@@ -1370,7 +1917,7 @@ def test_query_rewrite_payload_builds_expanded_retrieval_query() -> None:
             "confidence": 0.82,
         },
         backend="ollama",
-        model="gemma4:e2b",
+        model="qwen3.5:9b",
         max_queries=4,
     )
 
@@ -1393,7 +1940,7 @@ def test_query_rewrite_payload_drops_null_like_strings() -> None:
             "confidence": 0.4,
         },
         backend="ollama",
-        model="gemma4:e2b",
+        model="qwen3.5:9b",
         max_queries=4,
     )
 
@@ -1435,12 +1982,142 @@ def test_ollama_query_rewriter_disables_thinking(monkeypatch) -> None:
 
     result = OllamaQueryRewriter(
         base_url="http://ollama:11434",
-        model="gemma4:e2b",
+        model="qwen3.5:9b",
     ).rewrite("notice")
 
     assert captured["json"]["think"] is False
     assert result.applied is True
     assert result.canonical_query == "notice rulemaking"
+
+
+def test_answer_endpoint_model_fallbacks_for_bm25_only_general_definition(
+    monkeypatch, tmp_path
+) -> None:
+    query = "灰度域和彩色域是什么"
+
+    class FakeRetriever:
+        candidate_pool = 1
+
+        def retrieve(self, query: str, *, top_k: int, mode: str, filters=None, **kwargs):
+            return [
+                RetrievalHit(
+                    chunk_id="1",
+                    source_id="personal-test",
+                    doc_type="note",
+                    title="Personal Test Note",
+                    citation="Personal Test Note v1",
+                    jurisdiction="PERSONAL",
+                    text="个人知识库助手会记录记忆分类、RAG 指标、ShowMaker 和炫神的个人测试描述。",
+                    dense_score=0.0,
+                    bm25_score=2.5,
+                    fusion_score=0.05,
+                )
+            ]
+
+    class FakeStore:
+        embedder = MappingEmbedder({query: [1.0, 0.0]})
+
+    class FakeRewriter:
+        def rewrite(self, query: str):
+            return QueryRewriteResult(original_query=query, retrieval_query=query)
+
+    class FakeRouter:
+        def route(self, query: str, **kwargs):
+            return route_result(
+                need_retrieval=True,
+                intent="answer_question",
+                domain="personal_kb",
+                query_type="definition",
+                retrieval_strategy="hybrid",
+                answer_source="personal_kb",
+                kb_required=False,
+                allow_model_fallback=True,
+                confidence=0.92,
+                priority_reason="kb_first",
+            )
+
+    class FakeAnswerer:
+        def __init__(self, config) -> None:
+            self.config = config
+
+        def generate(self, question: str, hits: list[RetrievalHit]):
+            raise AssertionError("grounded answerer should not run for irrelevant candidates")
+
+    class FakeGeneralAnswerer:
+        def __init__(self, config) -> None:
+            self.config = config
+
+        def generate(self, question: str, *, fallback_from_kb: bool = False, kb_required: bool = False):
+            assert question == query
+            assert fallback_from_kb is True
+            assert kb_required is False
+            return {
+                "enabled": True,
+                "skipped": False,
+                "reason": "kb_no_relevant_evidence",
+                "refused": False,
+                "answer_status": "model_fallback",
+                "answer": "个人知识库没有找到直接相关内容；根据一般常识，灰度域通常指只包含亮度信息的表示，彩色域通常指包含颜色通道的表示。",
+                "citations": [],
+                "grounding": {
+                    "question_type": "definition",
+                    "answerable": True,
+                    "checked_hit_count": 0,
+                    "required_evidence": "模型通用知识；不使用个人知识库引用",
+                    "answer_mode": "general_knowledge_fallback",
+                    "matched_cues": [],
+                    "missing_evidence": ["personal_kb_evidence"],
+                },
+                "llm": self.config.safe_dict(),
+                "usage": None,
+                "duration_ms": 1.0,
+                "error": None,
+            }
+
+    import legal_rag.api as api_module
+
+    monkeypatch.setattr(
+        api_module,
+        "runtime",
+        lambda: (
+            fake_settings(tmp_path, "bm25_only_general_definition_traces.json"),
+            FakeStore(),
+            FakeRetriever(),
+            None,
+            FakeRewriter(),
+        ),
+    )
+    monkeypatch.setattr(api_module, "build_intent_router", lambda settings: FakeRouter())
+    monkeypatch.setattr(api_module, "OpenAICompatibleAnswerer", FakeAnswerer)
+    monkeypatch.setattr(api_module, "GeneralKnowledgeAnswerer", FakeGeneralAnswerer)
+
+    client = TestClient(app)
+    response = client.post(
+        "/answer",
+        json={
+            "query": query,
+            "top_k": 1,
+            "mode": "hybrid",
+            "llm": {
+                "provider": "openai_compatible",
+                "base_url": "https://api.example.com/v1",
+                "model": "example-model",
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["retrieval_status"] == "model_fallback"
+    assert data["answer_source"] == "model"
+    assert data["hit_count"] == 0
+    assert data["candidate_hit_count"] == 1
+    assert data["relevant_hit_count"] == 0
+    assert data["hits"] == []
+    assert data["answer"]["answer_status"] == "model_fallback"
+    assert data["answer"]["citations"] == []
+    assert "灰度" in data["answer"]["answer"]
+    assert "彩色" in data["answer"]["answer"]
 
 
 def test_frontend_is_served() -> None:
@@ -1452,10 +2129,19 @@ def test_frontend_is_served() -> None:
 
     assert index_response.status_code == 200
     assert "Legal RAG" in index_response.text
+    assert "thinkingToggle" in index_response.text
+    assert "Thinking" in index_response.text
     assert css_response.status_code == 200
     assert "docket-shell" in css_response.text
     assert "--composer-space" in css_response.text
+    assert ".thinking-toggle" in css_response.text
     assert js_response.status_code == 200
+    assert "thinking_enabled" in js_response.text
+    assert "THINKING_LLM_TIMEOUT_SECONDS = 180" in js_response.text
+    assert "timeout_seconds: answerTimeoutSeconds()" in js_response.text
+    assert "setThinkingEnabled" in js_response.text
+    assert "模型生成超时，已尝试关闭 Thinking 重试" in js_response.text
+    assert "模型只返回了思考内容或空正文" in js_response.text
     assert "证据不足" in js_response.text
     assert "基于现有材料" in js_response.text
     assert "模型未能回答" in js_response.text
@@ -1469,6 +2155,10 @@ def test_frontend_is_served() -> None:
     assert "Answer source" in js_response.text
     assert "KB required" in js_response.text
     assert "Model fallback" in js_response.text
+    assert "个人库返回" in js_response.text
+    assert "相关证据" in js_response.text
+    assert "Candidates" in js_response.text
+    assert "Relevant" in js_response.text
     assert "路由决策" in js_response.text
     assert "intent_confidence" in js_response.text
     assert 'pack.retrieval_status === "not_run"' in js_response.text

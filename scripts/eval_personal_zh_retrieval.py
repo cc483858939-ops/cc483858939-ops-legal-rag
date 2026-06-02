@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import re
 import urllib.request
 from pathlib import Path
 from typing import Any
@@ -31,7 +32,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--api-url", default=None, help="Evaluate a running API endpoint")
     parser.add_argument("--endpoint", choices=["evidence", "answer"], default="evidence")
     parser.add_argument("--llm-base-url", default="http://ollama:11434/v1")
-    parser.add_argument("--llm-model", default="gemma4:e2b")
+    parser.add_argument("--llm-model", default="qwen3.5:9b")
     parser.add_argument("--llm-temperature", type=float, default=0.2)
     parser.add_argument("--llm-max-tokens", type=int, default=700)
     parser.add_argument("--llm-timeout-seconds", type=float, default=120.0)
@@ -140,11 +141,22 @@ def build_summary(
         "answer_any_term_rate": avg("answer_any_term"),
         "citation_present_rate": avg("citation_present"),
         "llm_error_rate": avg("llm_error"),
+        "model_fallback_rate": avg("model_fallback"),
+        "partial_answer_rate": avg("partial_answer"),
+        "unsupported_claim_rate": avg("unsupported_claim"),
+        "mean_used_citation_count": avg("used_citation_count"),
+        "forbidden_claim_rate": avg("forbidden_claim_hit"),
         "missing_ids": [row["id"] for row in rows if row["first_relevant_rank"] is None],
         "evidence_blocked_ids": [
             row["id"] for row in rows if row["evidence_relevant"] is not True
         ],
         "answer_failed_ids": [row["id"] for row in rows if row["answer_success"] != 1.0],
+        "model_fallback_ids": [row["id"] for row in rows if row["model_fallback"] == 1.0],
+        "unsupported_claim_ids": [row["id"] for row in rows if row["unsupported_claim"] == 1.0],
+        "forbidden_claim_failure_ids": [
+            row["id"] for row in rows if row["forbidden_claim_hit"] == 1.0
+        ],
+        "retrieval_status_counts": count_values(rows, "retrieval_status"),
         "answer_status_counts": count_values(rows, "answer_status"),
         "rows": rows,
     }
@@ -163,6 +175,10 @@ def row_from_hits(
     reranker_skipped: bool,
     answer: dict[str, Any] | None = None,
     retrieval_status: str | None = None,
+    answer_source: str | None = None,
+    intent: str | None = None,
+    candidate_hit_count: int | None = None,
+    relevant_hit_count: int | None = None,
 ) -> dict[str, Any]:
     rank = first_relevant_rank(hits, terms)
     binary_relevance = [
@@ -175,6 +191,12 @@ def row_from_hits(
     answer_text = str(answer.get("answer") or "")
     answer_status = str(answer.get("answer_status") or "")
     answer_citations = answer.get("citations") if isinstance(answer.get("citations"), list) else []
+    grounding = answer.get("grounding") if isinstance(answer.get("grounding"), dict) else {}
+    unsupported_claims = grounding.get("unsupported_claims") if isinstance(grounding, dict) else []
+    used_span_ids = grounding.get("used_support_span_ids") if isinstance(grounding, dict) else []
+    forbidden_patterns = list(case.get("forbidden_claim_patterns") or case.get("forbidden_terms") or [])
+    forbidden_claim_hit = any(pattern_matches(answer_text, pattern) for pattern in forbidden_patterns)
+    model_fallback = answer_status == "model_fallback" or retrieval_status == "model_fallback"
     answer_success = answer_status in {"answered", "partial", "model_fallback"}
     grounded_answer = bool(
         retrieval_status == "retrieved"
@@ -207,7 +229,11 @@ def row_from_hits(
         "top_bm25_score": hit_bm25_score(top_hit) if top_hit is not None else 0.0,
         "top_citation": hit_citation(top_hit) if top_hit is not None else None,
         "top_text_preview": hit_text(top_hit)[:160] if top_hit is not None else "",
+        "candidate_hit_count": candidate_hit_count if candidate_hit_count is not None else len(hits),
+        "relevant_hit_count": relevant_hit_count if relevant_hit_count is not None else len(hits),
         "retrieval_status": retrieval_status,
+        "answer_source": answer_source,
+        "intent": intent,
         "answer_status": answer_status,
         "answer_success": 1.0 if answer_success else 0.0,
         "grounded_answer": 1.0 if grounded_answer else 0.0,
@@ -215,6 +241,12 @@ def row_from_hits(
         "answer_any_term": 1.0 if any(answer_term_matches) else 0.0,
         "citation_present": 1.0 if answer_citations else 0.0,
         "llm_error": 1.0 if answer_status == "error" or answer.get("error") else 0.0,
+        "model_fallback": 1.0 if model_fallback else 0.0,
+        "partial_answer": 1.0 if answer_status == "partial" else 0.0,
+        "unsupported_claim": 1.0 if unsupported_claims else 0.0,
+        "used_citation_count": float(len(used_span_ids) if isinstance(used_span_ids, list) else len(answer_citations)),
+        "forbidden_claim_patterns": forbidden_patterns,
+        "forbidden_claim_hit": 1.0 if forbidden_claim_hit else 0.0,
         "answer_preview": answer_text[:240],
     }
 
@@ -225,6 +257,15 @@ def count_values(rows: list[dict[str, Any]], key: str) -> dict[str, int]:
         value = str(row.get(key) or "")
         counts[value] = counts.get(value, 0) + 1
     return counts
+
+
+def pattern_matches(text: str, pattern: str) -> bool:
+    if not pattern:
+        return False
+    try:
+        return re.search(pattern, text, flags=re.IGNORECASE) is not None
+    except re.error:
+        return pattern.casefold() in text.casefold()
 
 
 def run_eval(
@@ -269,6 +310,8 @@ def run_eval(
                 evidence_reason=evidence_relevance.reason,
                 accepted_queries=[query.query for query in extensions.accepted],
                 reranker_skipped=bool(reranker_summary.get("skipped")),
+                candidate_hit_count=len(hits),
+                relevant_hit_count=evidence_relevance.relevant_hit_count,
             )
         )
 
@@ -362,6 +405,10 @@ def run_api_eval(
                 reranker_skipped=bool(reranker.get("skipped")),
                 answer=answer,
                 retrieval_status=response.get("retrieval_status"),
+                answer_source=response.get("answer_source"),
+                intent=response.get("intent"),
+                candidate_hit_count=response.get("candidate_hit_count"),
+                relevant_hit_count=response.get("relevant_hit_count"),
             )
         )
 

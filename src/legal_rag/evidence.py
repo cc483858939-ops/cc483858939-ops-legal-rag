@@ -30,6 +30,8 @@ def build_evidence_pack(
     intent_reason: str = "knowledge_lookup",
     retrieval_status: str = "retrieved",
     relevance: dict | None = None,
+    candidate_hit_count: int | None = None,
+    relevant_hit_count: int | None = None,
 ) -> dict:
     rewrite = query_rewrite or QueryRewriteResult.original(query)
     extensions = query_extensions or build_query_extensions(
@@ -38,6 +40,8 @@ def build_evidence_pack(
         min_similarity=0.45,
     )
     route = route or {}
+    candidate_count = len(hits) if candidate_hit_count is None else candidate_hit_count
+    relevant_count = len(hits) if relevant_hit_count is None else relevant_hit_count
     return {
         "query": query,
         "intent": route.get("intent", intent),
@@ -67,7 +71,9 @@ def build_evidence_pack(
         "metadata_filters": metadata_filters.as_dict() if metadata_filters else {},
         "mode": mode,
         "top_k": top_k,
-        "hit_count": len(hits),
+        "hit_count": relevant_count,
+        "candidate_hit_count": candidate_count,
+        "relevant_hit_count": relevant_count,
         "hits": [format_evidence_hit(hit, rank=index + 1) for index, hit in enumerate(hits)],
     }
 

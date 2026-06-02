@@ -21,7 +21,7 @@
 - SentenceTransformers embedding：`BAAI/bge-base-zh-v1.5`、`BAAI/bge-m3`、`intfloat/e5-large-v2`、`Snowflake/snowflake-arctic-embed-l-v2.0`，需要 `EMBEDDING_BACKEND=sentence-transformers` 和 `INSTALL_MODEL_EXTRAS=true`
 - Reranker：`cross-encoder/ms-marco-MiniLM-L6-v2`、`BAAI/bge-reranker-large`、`mixedbread-ai/mxbai-rerank-large-v1`，需要 `INSTALL_MODEL_EXTRAS=true`
 - BM25：默认 `bm25-jieba`；备选 `Pyserini/Lucene`、`Elasticsearch/OpenSearch`、`rank-bm25`
-- Query rewrite：默认关闭；可用 Ollama + `gemma4:e2b` 在检索前把中文/口语问题扩展成英文案名、法条、缩写等检索词。
+- Query rewrite：默认关闭；可用 Ollama + `qwen3.5:9b` 在检索前把中文/口语问题扩展成英文案名、法条、缩写等检索词。
 
 ## 本地运行
 
@@ -74,33 +74,33 @@ OpenAI-compatible chat completions API 生成回答。前端可以选择 Ollama�
 OpenAI-compatible、OpenRouter、SiliconFlow、LM Studio 或自定义网关。API key 只随本次
 `/answer` 请求发送给后端，不写入 trace；前端默认只保存 URL、model、开关等非密钥配置。
 
-## Gemma 4 查询改写
+## Qwen 3.5 查询改写
 
 本项目可以在 `/evidence` 检索前增加一层本地模型 query rewrite，但仍不生成法律回答。
 模型只输出结构化检索词，后端继续返回 evidence pack。
 
-推荐这台 16GB RAM + RTX 4060 Laptop 8GB VRAM 机器先用 `gemma4:e2b`。`gemma4:e4b`
-也可能跑得动，但模型包更大、延迟更高；query rewrite 这种短任务优先选 E2B。
+推荐这台 16GB RAM + RTX 4060 Laptop 8GB VRAM 机器先用 `qwen3.5:9b`。`qwen3.5:4b`
+也可能跑得动，但模型包更大、延迟更高；query rewrite 这种短任务优先选 9B。
 
 不需要在 Windows 宿主机安装 Ollama。使用 Docker profile 启动可选 Ollama 服务：
 
 ```powershell
 docker compose --profile llm up -d ollama
-docker compose exec ollama ollama pull gemma4:e2b
+docker compose exec ollama ollama pull qwen3.5:9b
 ```
 
 启用 API 的 query rewrite：
 
 ```powershell
 $env:QUERY_REWRITE_BACKEND="ollama"
-$env:QUERY_REWRITE_MODEL="gemma4:e2b"
+$env:QUERY_REWRITE_MODEL="qwen3.5:9b"
 $env:QUERY_REWRITE_TIMEOUT_SECONDS="60"
 docker compose --profile llm up -d qdrant ollama api
 ```
 
 如果 Ollama 没启动、模型没拉取或改写超时，`/evidence` 会自动退回原始 query 检索，
 并在返回 JSON 的 `query_rewrite.error` 中说明原因。
-`gemma4:e2b` 冷启动加载可能需要 30 秒以上，所以默认给 query rewrite 留 60 秒超时。
+`qwen3.5:9b` 冷启动加载可能需要 30 秒以上，所以默认给 query rewrite 留 60 秒超时。
 
 ## 测试
 

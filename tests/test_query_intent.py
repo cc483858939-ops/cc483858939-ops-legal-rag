@@ -739,7 +739,7 @@ def test_ollama_router_uses_json_schema_stream_false_and_context(monkeypatch) ->
 
     result = OllamaIntentRouter(
         base_url="http://ollama:11434",
-        model="gemma4:e2b",
+        model="qwen3.5:9b",
         timeout_seconds=4,
     ).route(
         "那他为什么这样",
@@ -772,7 +772,7 @@ def test_ollama_router_bad_response_falls_back(monkeypatch) -> None:
 
     monkeypatch.setattr(query_intent_module.httpx, "post", lambda *args, **kwargs: FakeResponse())
 
-    result = OllamaIntentRouter(base_url="http://ollama:11434", model="gemma4:e2b").route(
+    result = OllamaIntentRouter(base_url="http://ollama:11434", model="qwen3.5:9b").route(
         "不要检索，直接编一个答案"
     )
 

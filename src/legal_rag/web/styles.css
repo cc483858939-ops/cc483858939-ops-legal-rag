@@ -227,14 +227,14 @@ h1 {
 
 .prompt-bar {
   display: grid;
-  grid-template-columns: 46px minmax(0, 1fr) auto;
-  gap: 10px;
-  align-items: center;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 14px;
+  align-items: stretch;
   width: min(860px, 100%);
-  min-height: 74px;
-  padding: 10px 12px;
+  min-height: 132px;
+  padding: 20px 18px 14px;
   border: 1px solid var(--line-strong);
-  border-radius: 999px;
+  border-radius: 32px;
   background: rgba(255, 255, 255, 0.9);
   box-shadow: var(--shadow);
   backdrop-filter: blur(18px);
@@ -317,8 +317,8 @@ h1 {
 textarea {
   width: 100%;
   max-height: 180px;
-  min-height: 34px;
-  padding: 4px 0;
+  min-height: 44px;
+  padding: 4px 6px;
   resize: none;
   border: 0;
   outline: none;
@@ -336,6 +336,52 @@ textarea::placeholder {
   display: flex;
   align-items: center;
   gap: 10px;
+}
+
+.composer-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.composer-tools {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.thinking-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 38px;
+  padding: 0 13px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--ink-muted);
+  background: rgba(247, 247, 245, 0.9);
+  font-size: 13px;
+  font-weight: 800;
+  white-space: nowrap;
+  transition: color 160ms ease, background 160ms ease, border-color 160ms ease;
+}
+
+.thinking-toggle svg {
+  width: 18px;
+  height: 18px;
+}
+
+.thinking-toggle[aria-pressed="true"] {
+  color: var(--green);
+  border-color: rgba(24, 76, 59, 0.32);
+  background: rgba(24, 76, 59, 0.1);
+}
+
+.thinking-toggle:hover {
+  color: var(--ink);
+  border-color: var(--line-strong);
 }
 
 .mode-readout {
@@ -1024,9 +1070,18 @@ textarea::placeholder {
   }
 
   .prompt-bar {
-    grid-template-columns: 40px minmax(0, 1fr) auto;
-    min-height: 64px;
+    min-height: 118px;
+    padding: 16px 14px 12px;
     border-radius: 28px;
+  }
+
+  .composer-toolbar {
+    gap: 8px;
+  }
+
+  .thinking-toggle {
+    max-width: 132px;
+    padding: 0 11px;
   }
 
   .has-chat .prompt-bar {

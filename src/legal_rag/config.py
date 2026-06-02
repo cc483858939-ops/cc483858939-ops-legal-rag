@@ -43,7 +43,7 @@ class Settings(BaseSettings):
 
     query_rewrite_backend: str = "none"
     query_rewrite_base_url: str = "http://localhost:11434"
-    query_rewrite_model: str = "gemma4:e2b"
+    query_rewrite_model: str = "qwen3.5:9b"
     query_rewrite_timeout_seconds: float = Field(default=60.0, ge=0.1)
     query_rewrite_max_queries: int = Field(default=4, ge=1, le=10)
     inferred_metadata_filters_enabled: bool = True
@@ -51,7 +51,7 @@ class Settings(BaseSettings):
     query_extension_min_similarity: float = Field(default=0.45, ge=0.0, le=1.0)
     intent_router_backend: str = "ollama"
     intent_router_base_url: str = "http://localhost:11434"
-    intent_router_model: str = "gemma4:e2b"
+    intent_router_model: str = "qwen3.5:9b"
     intent_router_timeout_seconds: float = Field(default=60.0, ge=0.1)
     intent_router_low_confidence_threshold: float = Field(default=0.75, ge=0.0, le=1.0)
     intent_router_context_turns: int = Field(default=5, ge=0, le=12)
