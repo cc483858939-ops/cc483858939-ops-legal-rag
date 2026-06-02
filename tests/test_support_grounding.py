@@ -24,24 +24,24 @@ def _hit(text: str, *, chunk_id: str = "1") -> RetrievalHit:
 
 
 def test_support_spans_split_adjacent_alias_facts() -> None:
-    spans = build_support_spans([_hit("A 是 X。B 又称 C。")])
+    spans = build_support_spans([_hit("甲方是选手。乙方又称小乙。")])
 
-    assert [span.text for span in spans] == ["A 是 X。", "B 又称 C。"]
+    assert [span.text for span in spans] == ["甲方是选手。", "乙方又称小乙。"]
     assert spans[0].span_id == "S1"
     assert spans[1].span_id == "S2"
 
 
 def test_claim_validation_rejects_alias_bleed_from_adjacent_span() -> None:
-    hit = _hit("A 是 X。B 又称 C。")
+    hit = _hit("甲方是选手。乙方又称小乙。")
     spans = build_support_spans([hit])
-    grounding = AnswerabilityGate().evaluate("A 是谁", [hit])
+    grounding = AnswerabilityGate().evaluate("甲方是谁", [hit])
 
-    checks = validate_grounded_claims("根据你的个人知识库，A 又称 C。[S1]", spans, grounding=grounding)
+    checks = validate_grounded_claims("根据你的个人知识库，甲方又称小乙。[S1]", spans, grounding=grounding)
 
     assert checks
     assert checks[0].supported is False
     assert "又称" not in checks[0].missing_terms
-    assert "C" in checks[0].missing_terms or "c" in checks[0].missing_terms
+    assert "小乙" in checks[0].missing_terms
 
 
 def test_openai_answerer_retries_then_falls_back_on_unsupported_claim(monkeypatch) -> None:
@@ -59,7 +59,7 @@ def test_openai_answerer_retries_then_falls_back_on_unsupported_claim(monkeypatc
 
     def fake_post(url, *, json, headers, timeout):
         calls.append(json)
-        return FakeResponse("根据你的个人知识库，A 又称 C。[S1]")
+        return FakeResponse("根据你的个人知识库，甲方又称小乙。[S1]")
 
     import legal_rag.llm_answer as llm_answer_module
 
@@ -71,11 +71,11 @@ def test_openai_answerer_retries_then_falls_back_on_unsupported_claim(monkeypatc
             base_url="https://api.example.com/v1",
             model="example-model",
         )
-    ).generate("A 是谁", [_hit("A 是 X。B 又称 C。")])
+    ).generate("甲方是谁", [_hit("甲方是选手。乙方又称小乙。")])
 
     assert len(calls) == 2
     assert result["reason"] == "unsupported_claim_fallback"
-    assert result["answer"].startswith("根据你的个人知识库，A 是 X。")
+    assert result["answer"].startswith("根据你的个人知识库，甲方是选手。")
     assert result["grounding"]["unsupported_claims"] == []
     assert result["grounding"]["used_support_span_ids"] == ["S1"]
     assert [citation["support_span_id"] for citation in result["citations"]] == ["S1"]
