@@ -141,6 +141,7 @@ def retrieve(request: RetrieveRequest):
 def evidence(request: EvidenceRequest):
     settings, store, retriever, _, rewriter = runtime()
     trace = TraceCollector.from_settings(settings)
+    response: dict[str, Any] | None = None
     request_stage = trace.start_stage(
         "request",
         {
@@ -173,7 +174,9 @@ def evidence(request: EvidenceRequest):
         trace.end_stage(request_stage, {"trace_id": trace.trace_id}, error=exc)
         raise
     finally:
-        trace.write_rolling_json()
+        trace_persisted = trace.write_rolling_json()
+        if response is not None:
+            _apply_trace_metadata(response, trace, trace_persisted)
 
 
 @app.post("/answer")
@@ -181,6 +184,7 @@ def answer(request: AnswerRequest):
     settings, store, retriever, _, rewriter = runtime()
     trace = TraceCollector.from_settings(settings)
     llm_config = _llm_config_from_request(request.llm)
+    response: dict[str, Any] | None = None
     request_stage = trace.start_stage(
         "request",
         {
@@ -266,6 +270,7 @@ def answer(request: AnswerRequest):
                 "duration_ms": answer_result.get("duration_ms"),
                 "error": answer_result.get("error"),
                 "citation_count": len(answer_result.get("citations") or []),
+                "grounding": _trace_answer_grounding(answer_result, trace),
             },
         )
         if _should_post_answer_fallback(response, answer_result):
@@ -294,7 +299,9 @@ def answer(request: AnswerRequest):
         trace.end_stage(request_stage, {"trace_id": trace.trace_id}, error=exc)
         raise
     finally:
-        trace.write_rolling_json()
+        trace_persisted = trace.write_rolling_json()
+        if response is not None:
+            _apply_trace_metadata(response, trace, trace_persisted)
 
 
 @app.post("/query")
@@ -303,6 +310,64 @@ def query(request: QueryRequest):
     hits = retriever.retrieve(request.question, top_k=request.top_k)
     answer = answerer.answer(request.question, hits)
     return answer.model_dump(mode="json")
+
+
+def _apply_trace_metadata(response: dict[str, Any], trace: TraceCollector, persisted: bool) -> None:
+    response.update(trace.response_metadata(persisted=persisted))
+
+
+def _trace_answer_grounding(answer_result: dict[str, Any], trace: TraceCollector) -> dict[str, Any]:
+    grounding = answer_result.get("grounding")
+    if not isinstance(grounding, dict):
+        return {}
+
+    fields = (
+        "question_type",
+        "answerable",
+        "required_evidence",
+        "answer_mode",
+        "matched_cues",
+        "missing_evidence",
+        "answer_units",
+        "support_spans",
+        "claim_checks",
+        "unsupported_claims",
+        "used_support_span_ids",
+        "retry_count",
+        "retry_reason",
+        "recovered_from_thinking",
+    )
+    output = {key: grounding[key] for key in fields if key in grounding}
+    if isinstance(output.get("support_spans"), list):
+        output["support_spans"] = [
+            _truncate_trace_text_fields(item, trace)
+            for item in output["support_spans"][: trace.max_items_per_stage]
+        ]
+    if isinstance(output.get("claim_checks"), list):
+        output["claim_checks"] = [
+            _truncate_trace_text_fields(item, trace)
+            for item in output["claim_checks"][: trace.max_items_per_stage]
+        ]
+    if isinstance(output.get("unsupported_claims"), list):
+        output["unsupported_claims"] = [
+            _truncate_trace_text_fields(item, trace)
+            for item in output["unsupported_claims"][: trace.max_items_per_stage]
+        ]
+    return output
+
+
+def _truncate_trace_text_fields(value: Any, trace: TraceCollector) -> Any:
+    if isinstance(value, dict):
+        truncated = {}
+        for key, item in value.items():
+            if isinstance(item, str) and key in {"text", "claim", "reason"}:
+                truncated[key] = item[: trace.text_chars] if trace.text_chars else item
+            else:
+                truncated[key] = _truncate_trace_text_fields(item, trace)
+        return truncated
+    if isinstance(value, list):
+        return [_truncate_trace_text_fields(item, trace) for item in value]
+    return value
 
 
 def _run_evidence_pipeline(
@@ -427,9 +492,7 @@ def _run_evidence_pipeline(
             [],
             query_rewrite=query_rewrite,
             query_extensions=query_extensions,
-            trace_id=trace.trace_id,
-            trace_path=trace.public_path,
-            trace_retention_count=trace.retention_count,
+            **trace.response_metadata(),
             reranker_summary=reranker_summary,
             metadata_filters=metadata_filters,
             route=intent.as_dict(),
@@ -458,9 +521,7 @@ def _run_evidence_pipeline(
         hits,
         query_rewrite=query_rewrite,
         query_extensions=query_extensions,
-        trace_id=trace.trace_id,
-        trace_path=trace.public_path,
-        trace_retention_count=trace.retention_count,
+        **trace.response_metadata(),
         reranker_summary=reranker_summary,
         metadata_filters=metadata_filters,
         route=intent.as_dict(),
@@ -530,9 +591,7 @@ def _non_retrieval_response(
         "retrieval_query": "",
         "query_rewrite": None,
         "query_extensions": None,
-        "trace_id": trace.trace_id,
-        "trace_path": trace.public_path,
-        "trace_retention_count": trace.retention_count,
+        **trace.response_metadata(),
         "reranker": {"enabled": False, "skipped": True, "reason": "intent_not_retrieved"},
         "metadata_filters": {},
         "mode": request.mode,
@@ -622,6 +681,7 @@ def _generate_general_answer(
             "duration_ms": answer_result.get("duration_ms"),
             "error": answer_result.get("error"),
             "citation_count": len(answer_result.get("citations") or []),
+            "grounding": _trace_answer_grounding(answer_result, trace),
         },
     )
     return answer_result

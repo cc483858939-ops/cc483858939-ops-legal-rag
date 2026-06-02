@@ -19,7 +19,7 @@ class TraceCollector:
         *,
         enabled: bool = True,
         path: str | Path = "runtime/traces/evidence_traces.json",
-        retention_count: int = 10,
+        retention_count: int = 30,
         include_text: bool = False,
         text_chars: int = 300,
         max_items_per_stage: int = 20,
@@ -53,7 +53,7 @@ class TraceCollector:
         return cls(
             enabled=bool(getattr(settings, "trace_enabled", True)),
             path=getattr(settings, "trace_path", "runtime/traces/evidence_traces.json"),
-            retention_count=int(getattr(settings, "trace_retention_count", 10)),
+            retention_count=int(getattr(settings, "trace_retention_count", 30)),
             include_text=bool(getattr(settings, "trace_include_text", False)),
             text_chars=int(getattr(settings, "trace_text_chars", 300)),
             max_items_per_stage=int(getattr(settings, "trace_max_items_per_stage", 20)),
@@ -62,6 +62,15 @@ class TraceCollector:
     @property
     def public_path(self) -> str:
         return str(self.path)
+
+    def response_metadata(self, *, persisted: bool | None = None) -> dict:
+        return {
+            "trace_enabled": self.enabled,
+            "trace_id": self.trace_id if self.enabled else None,
+            "trace_path": self.public_path if self.enabled else None,
+            "trace_retention_count": self.retention_count,
+            "trace_persisted": bool(persisted) if self.enabled else False,
+        }
 
     def add_settings(self, values: dict) -> None:
         self.trace["settings"].update(jsonable(values))
@@ -158,9 +167,9 @@ class TraceCollector:
         self.trace["duration_ms"] = elapsed_ms(self._started_perf)
         self._finished = True
 
-    def write_rolling_json(self) -> None:
+    def write_rolling_json(self) -> bool:
         if not self.enabled:
-            return
+            return False
         self.finish()
         try:
             with _TRACE_WRITE_LOCK:
@@ -172,8 +181,10 @@ class TraceCollector:
                     json.dumps(existing, ensure_ascii=False, indent=2),
                     encoding="utf-8",
                 )
+                return True
         except Exception as exc:  # noqa: BLE001 - tracing must not break retrieval.
             self.add_error("trace_write", exc)
+            return False
 
 
 def read_trace_array(path: str | Path) -> list[dict]:

@@ -60,7 +60,7 @@ class Settings(BaseSettings):
 
     trace_enabled: bool = True
     trace_path: str = str(ROOT_DIR / "runtime" / "traces" / "evidence_traces.json")
-    trace_retention_count: int = Field(default=10, ge=1)
+    trace_retention_count: int = Field(default=30, ge=1)
     trace_include_text: bool = False
     trace_text_chars: int = Field(default=300, ge=0)
     trace_max_items_per_stage: int = Field(default=20, ge=1)

@@ -73,6 +73,18 @@ Endpoints：
 OpenAI-compatible chat completions API 生成回答。前端可以选择 Ollama、DeepSeek、
 OpenAI-compatible、OpenRouter、SiliconFlow、LM Studio 或自定义网关。API key 只随本次
 `/answer` 请求发送给后端，不写入 trace；前端默认只保存 URL、model、开关等非密钥配置。
+`/evidence` 和 `/answer` 在 `TRACE_ENABLED=true` 时都会写入 trace，默认只保留最近 30 个问题。
+
+查看 trace：
+
+```powershell
+docker compose run --rm cli legal-rag trace list
+docker compose run --rm cli legal-rag trace show
+docker compose run --rm cli legal-rag trace show --trace-id <trace_id>
+```
+
+trace 关闭时，API 响应会返回 `trace_enabled=false`、`trace_persisted=false`，并且
+`trace_id`/`trace_path` 为 `null`，避免展示一个实际不可查询的 trace。
 
 ## Qwen 3.5 查询改写
 

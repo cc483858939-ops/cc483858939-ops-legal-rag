@@ -49,10 +49,12 @@ def route_result(**overrides) -> QueryIntentResult:
     return QueryIntentResult.model_validate(data)
 
 
-def fake_settings(tmp_path, trace_name: str = "traces.json"):
+def fake_settings(tmp_path, trace_name: str = "traces.json", *, trace_enabled: bool = True):
+    enabled = trace_enabled
+
     class FakeSettings:
         query_extension_min_similarity = 0.0
-        trace_enabled = True
+        trace_enabled = enabled
         trace_path = str(tmp_path / trace_name)
         trace_retention_count = 10
         trace_include_text = False
@@ -239,7 +241,10 @@ def test_evidence_endpoint_uses_retriever(monkeypatch, tmp_path) -> None:
     assert data["retrieval_query"] == "notice | Federal Register notice | Federal Register"
     assert data["query_rewrite"]["backend"] == "test"
     assert data["query_rewrite"]["applied"] is True
+    assert data["trace_enabled"] is True
+    assert data["trace_persisted"] is True
     assert data["trace_id"]
+    assert data["trace_path"] == str(tmp_path / "evidence_traces.json")
     assert data["trace_retention_count"] == 10
     assert data["reranker"]["skipped"] is True
     assert data["query_extensions"]["accepted"][0]["source"] == "original"
@@ -269,6 +274,59 @@ def test_evidence_endpoint_uses_retriever(monkeypatch, tmp_path) -> None:
     assert "query_extension_filter" in stage_names
     assert "multi_query_fusion" in stage_names
     assert "cross_encoder_rerank" in stage_names
+
+
+def test_evidence_endpoint_does_not_expose_unpersisted_trace_when_disabled(monkeypatch, tmp_path) -> None:
+    class FakeRetriever:
+        candidate_pool = 1
+
+        def retrieve(self, query: str, *, top_k: int, mode: str, filters=None, **kwargs):
+            return [
+                RetrievalHit(
+                    chunk_id="1",
+                    source_id="s",
+                    doc_type="note",
+                    title="Trace Note",
+                    citation="Trace Note v1",
+                    jurisdiction="GLOBAL",
+                    text="notice",
+                    bm25_score=1.0,
+                    fusion_score=0.7,
+                )
+            ]
+
+    class FakeStore:
+        embedder = None
+
+    class FakeRewriter:
+        def rewrite(self, query: str):
+            return QueryRewriteResult.original(query)
+
+    class FakeRouter:
+        def route(self, query: str, **kwargs):
+            return route_result()
+
+    import legal_rag.api as api_module
+
+    settings = fake_settings(tmp_path, "disabled_traces.json", trace_enabled=False)
+    monkeypatch.setattr(
+        api_module,
+        "runtime",
+        lambda: (settings, FakeStore(), FakeRetriever(), None, FakeRewriter()),
+    )
+    monkeypatch.setattr(api_module, "build_intent_router", lambda _settings: FakeRouter())
+
+    client = TestClient(app)
+    response = client.post("/evidence", json={"query": "notice", "top_k": 1, "mode": "bm25"})
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["trace_enabled"] is False
+    assert data["trace_persisted"] is False
+    assert data["trace_id"] is None
+    assert data["trace_path"] is None
+    assert data["trace_retention_count"] == 10
+    assert not (tmp_path / "disabled_traces.json").exists()
 
 
 def test_retrieve_endpoint_accepts_explicit_filters(monkeypatch) -> None:
@@ -386,6 +444,20 @@ def test_answer_endpoint_adds_llm_answer(monkeypatch, tmp_path) -> None:
                     "answer_mode": "direct",
                     "matched_cues": [],
                     "missing_evidence": [],
+                    "support_spans": [
+                        {
+                            "span_id": "S1",
+                            "text": "Refunds are issued within 7 business days after inspection approval.",
+                        }
+                    ],
+                    "claim_checks": [
+                        {
+                            "claim": "退款通常在验收通过后 7 个工作日内完成。",
+                            "supported": True,
+                            "support_span_ids": ["S1"],
+                        }
+                    ],
+                    "used_support_span_ids": ["S1"],
                 },
                 "llm": self.config.safe_dict(),
                 "usage": {"total_tokens": 12},
@@ -432,9 +504,16 @@ def test_answer_endpoint_adds_llm_answer(monkeypatch, tmp_path) -> None:
     assert data["answer"]["llm"]["thinking_enabled"] is True
     assert data["answer"]["llm"]["timeout_seconds"] == 180.0
     assert data["answer"]["llm"]["api_key_configured"] is True
+    assert data["trace_enabled"] is True
+    assert data["trace_persisted"] is True
+    assert data["trace_path"] == str(tmp_path / "answer_traces.json")
     assert "secret" not in json.dumps(data, ensure_ascii=False)
     traces = json.loads((tmp_path / "answer_traces.json").read_text(encoding="utf-8"))
-    assert "answer_generation" in [stage["name"] for stage in traces[0]["stages"]]
+    answer_stage = next(stage for stage in traces[0]["stages"] if stage["name"] == "answer_generation")
+    assert answer_stage["output"]["grounding"]["answer_mode"] == "direct"
+    assert answer_stage["output"]["grounding"]["support_spans"][0]["span_id"] == "S1"
+    assert answer_stage["output"]["grounding"]["claim_checks"][0]["supported"] is True
+    assert answer_stage["output"]["grounding"]["used_support_span_ids"] == ["S1"]
 
 
 def test_answer_endpoint_routes_statement_without_retrieval(monkeypatch, tmp_path) -> None:
