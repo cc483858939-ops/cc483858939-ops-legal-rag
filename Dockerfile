@@ -22,4 +22,4 @@ COPY data ./data
 COPY scripts ./scripts
 COPY tests ./tests
 
-CMD ["legal-rag", "--help"]
+CMD ["personal-notes-rag", "--help"]

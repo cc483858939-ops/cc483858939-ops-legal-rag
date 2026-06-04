@@ -1,4 +1,4 @@
-# legal-rag
+# Personal Notes RAG Project
 
 工程化法律场景 RAG 项目，默认链路是：
 
@@ -29,9 +29,9 @@
 copy .env.example .env
 docker compose build
 docker compose up -d qdrant
-docker compose run --rm cli legal-rag ingest --manifest configs/legal_sources.yml --offline
-docker compose run --rm cli legal-rag retrieve "What does 5 U.S.C. 553 require for notice?" --offline --debug
-docker compose run --rm cli legal-rag ask "What does 17 U.S.C. 107 say about fair use?" --offline
+docker compose run --rm cli personal-notes-rag ingest --manifest configs/legal_sources.yml --offline
+docker compose run --rm cli personal-notes-rag retrieve "What does 5 U.S.C. 553 require for notice?" --offline --debug
+docker compose run --rm cli personal-notes-rag ask "What does 17 U.S.C. 107 say about fair use?" --offline
 docker compose run --rm test
 ```
 
@@ -78,9 +78,9 @@ OpenAI-compatible、OpenRouter、SiliconFlow、LM Studio 或自定义网关。AP
 查看 trace：
 
 ```powershell
-docker compose run --rm cli legal-rag trace list
-docker compose run --rm cli legal-rag trace show
-docker compose run --rm cli legal-rag trace show --trace-id <trace_id>
+docker compose run --rm cli personal-notes-rag trace list
+docker compose run --rm cli personal-notes-rag trace show
+docker compose run --rm cli personal-notes-rag trace show --trace-id <trace_id>
 ```
 
 trace 关闭时，API 响应会返回 `trace_enabled=false`、`trace_persisted=false`，并且
@@ -127,7 +127,7 @@ docker compose run --rm test
 默认 sparse backend 为 `SPARSE_BACKEND=bm25_jieba`，不会下载 FastEmbed sparse 模型；
 只有显式设置 `SPARSE_BACKEND=qdrant_bm25` 时才会使用 `SPARSE_MODEL=Qdrant/bm25`。
 Qdrant 镜像约为 `271MB`。首次真实 ingest 会把 FastEmbed/Hugging Face 模型权重下载到
-Docker volume `legal-rag_model_cache`。
+Docker volume `personal-notes-rag-project_model_cache`。
 
 如果要启用 cross-encoder reranker 或 SentenceTransformers embedding backend，再显式构建重型镜像：
 
@@ -144,7 +144,7 @@ docker compose up -d qdrant api
 
 ```powershell
 docker compose down
-docker volume rm legal-rag_model_cache legal-rag_ollama_models
+docker volume rm personal-notes-rag-project_model_cache personal-notes-rag-project_ollama_models
 ```
 
 不要为了清理模型缓存直接执行 `docker compose down -v`，除非你也想删除 Qdrant 数据卷。

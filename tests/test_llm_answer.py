@@ -7,13 +7,8 @@ from legal_rag.llm_answer import (
     OpenAICompatibleAnswerer,
     _extract_answer_text,
     answer_result_indicates_insufficient_evidence,
-    build_extractive_answer,
-    build_support_spans,
     classify_question_type,
     extract_query_terms,
-    refine_grounding_for_answer_units,
-    select_support_spans,
-    validate_grounded_claims,
 )
 from legal_rag.schema import RetrievalHit
 
@@ -479,7 +474,7 @@ def test_contextual_definition_refusal_retries_with_personal_kb_meaning(monkeypa
     assert result["citations"]
 
 
-def test_contextual_definition_uses_extractive_answer_when_llm_keeps_refusing(monkeypatch) -> None:
+def test_contextual_definition_returns_llm_refusal_when_retry_keeps_refusing(monkeypatch) -> None:
     calls: list[dict] = []
 
     class FakeResponse:
@@ -522,16 +517,17 @@ def test_contextual_definition_uses_extractive_answer_when_llm_keeps_refusing(mo
     ).generate("打火机是什么", [hit])
 
     assert len(calls) == 2
-    assert result["reason"] == "contextual_definition_extractive"
-    assert result["answer_status"] == "answered"
+    assert result["reason"] == "llm_refused"
+    assert result["answer_status"] == "llm_refused"
+    assert result["refused"] is True
     assert result["grounding"]["answer_mode"] == "contextual_definition"
-    assert "炫神" in result["answer"]
-    assert "最喜欢的歌" in result["answer"]
-    assert "打火机" in result["answer"]
-    assert result["citations"]
+    assert result["grounding"]["context_hit_count"] == 1
+    assert result["citations"] == []
 
 
 def test_exact_contextual_definition_prefers_tight_relation_over_neighboring_facts(monkeypatch) -> None:
+    captured: dict = {}
+
     class FakeResponse:
         def raise_for_status(self) -> None:
             return None
@@ -541,14 +537,15 @@ def test_exact_contextual_definition_prefers_tight_relation_over_neighboring_fac
                 "choices": [
                     {
                         "message": {
-                            "content": "根据你的个人知识库，打火机是炫神最喜欢的歌，因为妹妹名字带雨、妈妈名字带云。[1]"
+                            "content": "根据你的个人知识库，打火机是炫神最喜欢的歌。[1]"
                         }
                     }
                 ],
                 "usage": {"total_tokens": 42},
             }
 
-    def fake_post(*args, **kwargs):
+    def fake_post(url, *, json, headers, timeout):
+        captured["json"] = json
         return FakeResponse()
 
     import legal_rag.llm_answer as llm_answer_module
@@ -574,136 +571,41 @@ def test_exact_contextual_definition_prefers_tight_relation_over_neighboring_fac
         )
     ).generate("打火机是什么", [hit])
 
-    assert result["reason"] == "contextual_definition_extractive"
-    assert result["answer"] == "根据你的个人知识库，打火机是炫神最喜欢的歌 [S1]"
+    assert "Evidence chunks" in captured["json"]["messages"][1]["content"]
+    assert result["reason"] is None
+    assert result["answer"] == "根据你的个人知识库，打火机是炫神最喜欢的歌。[1]"
     assert "妹妹" not in result["answer"]
     assert "妈妈" not in result["answer"]
+    assert result["citations"][0]["rank"] == 1
 
 
-def test_support_spans_split_adjacent_alias_facts_without_splitting_lists() -> None:
-    adjacent = build_support_spans([
-        RetrievalHit(
-            chunk_id="1",
-            source_id="synthetic",
-            doc_type="note",
-            title="Synthetic Note",
-            citation="Synthetic Note v1",
-            jurisdiction="PERSONAL",
-            text="甲方是选手，乙方又称小乙。他的父亲包括：张三,李四,王五。",
-            fusion_score=0.1,
-        )
-    ])
+def test_chunk_prompt_preserves_full_context_for_pronoun_resolution(monkeypatch) -> None:
+    captured: dict = {}
 
-    assert [span.text for span in adjacent] == [
-        "甲方是选手",
-        "乙方又称小乙。",
-        "他的父亲包括：张三,李四,王五。",
-    ]
+    class FakeResponse:
+        def raise_for_status(self) -> None:
+            return None
 
+        def json(self):
+            return {
+                "choices": [{"message": {"content": "根据你的个人知识库，Faker 是炫神的父亲之一。[1]"}}],
+                "usage": {"total_tokens": 12},
+            }
 
-def test_support_span_selection_expands_same_subject_detail_without_adjacent_object_fact() -> None:
-    hit = RetrievalHit(
-        chunk_id="1",
-        source_id="synthetic",
-        doc_type="note",
-        title="Synthetic Note",
-        citation="Synthetic Note v1",
-        jurisdiction="PERSONAL",
-        text=(
-            "ShowMaker是世界第一中单，炫狗是他的儿子。"
-            "ShowMaker的圣经是重铸LCK荣光我辈义不容辞。"
-            "他的父亲包括：Faker,ShowMaker,Theshy。"
-            "他对ShowMaker最孝顺。"
-        ),
-        fusion_score=0.1,
-    )
-    grounding = AnswerabilityGate().evaluate("英雄联盟世界第一中单是谁，他有什么成就", [hit])
-
-    spans = select_support_spans("英雄联盟世界第一中单是谁，他有什么成就", [hit], grounding=grounding)
-    texts = [span.text for span in spans]
-
-    assert "ShowMaker是世界第一中单" in texts
-    assert "ShowMaker的圣经是重铸LCK荣光我辈义不容辞。" in texts
-    assert not any("炫狗是他的儿子" in text for text in texts)
-    assert not any("他对ShowMaker最孝顺" in text for text in texts)
-
-
-def test_relation_question_prefers_relation_span_over_alias_span() -> None:
-    hit = RetrievalHit(
-        chunk_id="1",
-        source_id="synthetic",
-        doc_type="note",
-        title="Synthetic Note",
-        citation="Synthetic Note v1",
-        jurisdiction="PERSONAL",
-        text="炫神，又被称为炫狗。电棍是他的兄弟。",
-        fusion_score=0.1,
-    )
-    question = "电棍跟炫神什么关系"
-    grounding = AnswerabilityGate().evaluate(question, [hit])
-
-    spans = select_support_spans(question, [hit], grounding=grounding)
-
-    assert spans[0].text == "电棍是他的兄弟。"
-
-
-def test_compound_question_marks_missing_answer_unit_as_partial() -> None:
-    hit = RetrievalHit(
-        chunk_id="1",
-        source_id="synthetic",
-        doc_type="note",
-        title="Synthetic Note",
-        citation="Synthetic Note v1",
-        jurisdiction="PERSONAL",
-        text="甲方是世界第一中单。",
-        fusion_score=0.1,
-    )
-    question = "世界第一中单是谁，他有什么成就"
-    grounding = AnswerabilityGate().evaluate(question, [hit])
-    spans = select_support_spans(question, [hit], grounding=grounding)
-
-    refined = refine_grounding_for_answer_units(question, grounding, spans)
-
-    assert refined.answer_status == "partial"
-    assert refined.answer_mode == "partial_compound"
-
-
-def test_extractive_fallback_uses_same_subject_detail_span_for_partial_compound() -> None:
-    hit = RetrievalHit(
-        chunk_id="1",
-        source_id="synthetic",
-        doc_type="note",
-        title="Synthetic Note",
-        citation="Synthetic Note v1",
-        jurisdiction="PERSONAL",
-        text=(
-            "ShowMaker是世界第一中单，炫狗是他的儿子。"
-            "ShowMaker的圣经是重铸LCK荣光我辈义不容辞。"
-        ),
-        fusion_score=0.1,
-    )
-    question = "英雄联盟世界第一中单是谁，他有什么成就"
-    grounding = AnswerabilityGate().evaluate(question, [hit])
-    spans = select_support_spans(question, [hit], grounding=grounding)
-    refined = refine_grounding_for_answer_units(question, grounding, spans)
-
-    answer, used_ids = build_extractive_answer(question, spans, refined)
-
-    assert used_ids == ["S1", "S3"]
-    assert "ShowMaker是世界第一中单" in answer
-    assert "重铸LCK荣光我辈义不容辞" in answer
-    assert "材料不足以完整回答全部问题" in answer
-    assert "炫狗是他的儿子" not in answer
-
-
-def test_partial_compound_answer_uses_extractive_path_without_llm(monkeypatch) -> None:
-    def fake_post(*args, **kwargs):
-        raise AssertionError("partial compound answers should use extractive support spans")
+    def fake_post(url, *, json, headers, timeout):
+        captured["json"] = json
+        return FakeResponse()
 
     import legal_rag.llm_answer as llm_answer_module
 
     monkeypatch.setattr(llm_answer_module.httpx, "post", fake_post)
 
+    note = (
+        "炫神，又被称为炫狗。"
+        "电棍是他的兄弟。"
+        "他的父亲包括：Faker,ShowMaker,Theshy。"
+        "他对ShowMaker最孝顺，上演了久病床前有孝子的奇迹。"
+    )
     hit = RetrievalHit(
         chunk_id="1",
         source_id="synthetic",
@@ -711,10 +613,7 @@ def test_partial_compound_answer_uses_extractive_path_without_llm(monkeypatch) -
         title="Synthetic Note",
         citation="Synthetic Note v1",
         jurisdiction="PERSONAL",
-        text=(
-            "ShowMaker是世界第一中单，炫狗是他的儿子。"
-            "ShowMaker的圣经是重铸LCK荣光我辈义不容辞。"
-        ),
+        text=note,
         fusion_score=0.1,
     )
 
@@ -724,43 +623,19 @@ def test_partial_compound_answer_uses_extractive_path_without_llm(monkeypatch) -
             base_url="https://api.example.com/v1",
             model="example-model",
         )
-    ).generate("英雄联盟世界第一中单是谁，他有什么成就", [hit])
+    ).generate("Faker是谁", [hit])
 
-    assert result["reason"] == "partial_compound_extractive"
-    assert result["answer_status"] == "partial"
-    assert "ShowMaker是世界第一中单" in result["answer"]
-    assert "重铸LCK荣光我辈义不容辞" in result["answer"]
-    assert "材料不足以完整回答全部问题" in result["answer"]
-    assert "炫狗是他的儿子" not in result["answer"]
-
-
-def test_claim_validation_requires_citation_and_rejects_adjacent_alias_bleed() -> None:
-    hit = RetrievalHit(
-        chunk_id="1",
-        source_id="synthetic",
-        doc_type="note",
-        title="Synthetic Note",
-        citation="Synthetic Note v1",
-        jurisdiction="PERSONAL",
-        text="甲方是选手。乙方又称小乙。",
-        fusion_score=0.1,
-    )
-    spans = build_support_spans([hit])
-    grounding = AnswerabilityGate().evaluate("甲方是谁", [hit])
-
-    no_citation = validate_grounded_claims("根据你的个人知识库，甲方又称小乙。", spans, grounding=grounding)
-    alias_bleed = validate_grounded_claims("根据你的个人知识库，甲方又称小乙。[S1]", spans, grounding=grounding)
-    cross_span_bleed = validate_grounded_claims("根据你的个人知识库，甲方又称小乙。[S1][S2]", spans, grounding=grounding)
-
-    assert no_citation[0].supported is False
-    assert no_citation[0].reason == "missing_support_citation"
-    assert alias_bleed[0].supported is False
-    assert alias_bleed[0].reason == "relation_terms_not_supported_by_one_span"
-    assert cross_span_bleed[0].supported is False
-    assert cross_span_bleed[0].reason == "relation_terms_not_supported_by_one_span"
+    user_prompt = captured["json"]["messages"][1]["content"]
+    system_prompt = captured["json"]["messages"][0]["content"]
+    assert "Evidence chunks" in user_prompt
+    assert "complete chunk context" in system_prompt
+    assert note in user_prompt
+    assert result["answer"] == "根据你的个人知识库，Faker 是炫神的父亲之一。[1]"
+    assert result["citations"][0]["rank"] == 1
+    assert set(result["citations"][0]) == {"rank", "title", "citation", "chunk_id", "source_id"}
 
 
-def test_openai_answerer_retries_then_uses_extractive_answer_for_unsupported_claim(monkeypatch) -> None:
+def test_chunk_grounded_compound_answer_uses_llm_and_chunk_citations(monkeypatch) -> None:
     calls: list[dict] = []
 
     class FakeResponse:
@@ -769,8 +644,18 @@ def test_openai_answerer_retries_then_uses_extractive_answer_for_unsupported_cla
 
         def json(self):
             return {
-                "choices": [{"message": {"content": "根据你的个人知识库，甲方又称小乙。[S1]"}}],
-                "usage": {"total_tokens": 12},
+                "choices": [
+                    {
+                        "message": {
+                            "content": (
+                                "根据你的个人知识库，ShowMaker 被描述为英雄联盟世界第一中单；"
+                                "材料还提到他的圣经是“重铸LCK荣光我辈义不容辞”。"
+                                "当前材料没有提供冠军、数据或荣誉等具体成就。[1]"
+                            )
+                        }
+                    }
+                ],
+                "usage": {"total_tokens": 24},
             }
 
     def fake_post(url, *, json, headers, timeout):
@@ -788,7 +673,11 @@ def test_openai_answerer_retries_then_uses_extractive_answer_for_unsupported_cla
         title="Synthetic Note",
         citation="Synthetic Note v1",
         jurisdiction="PERSONAL",
-        text="甲方是选手。乙方又称小乙。",
+        text=(
+            "ShowMaker是世界第一中单，炫狗是他的儿子。"
+            "ShowMaker的圣经是重铸LCK荣光我辈义不容辞。"
+            "炫神，又被称为炫狗。"
+        ),
         fusion_score=0.1,
     )
 
@@ -798,25 +687,47 @@ def test_openai_answerer_retries_then_uses_extractive_answer_for_unsupported_cla
             base_url="https://api.example.com/v1",
             model="example-model",
         )
-    ).generate("甲方是谁", [hit])
+    ).generate("英雄联盟世界第一中单是谁，他有什么成就", [hit])
 
-    assert len(calls) == 2
-    assert result["reason"] == "unsupported_claim_fallback"
-    assert result["answer"].startswith("根据你的个人知识库，甲方是选手")
-    assert result["grounding"]["used_support_span_ids"] == ["S1"]
-    assert result["grounding"]["unsupported_claims"] == []
-    assert [citation["support_span_id"] for citation in result["citations"]] == ["S1"]
+    assert len(calls) == 1
+    assert result["reason"] is None
+    assert result["answer_status"] == "answered"
+    assert "ShowMaker" in result["answer"]
+    assert "重铸LCK荣光我辈义不容辞" in result["answer"]
+    assert "冠军、数据或荣誉" in result["answer"]
+    assert "ShowMaker 又被称为" not in result["answer"]
+    assert result["citations"] == [
+        {
+            "rank": 1,
+            "title": "Synthetic Note",
+            "citation": "Synthetic Note v1",
+            "chunk_id": "1",
+            "source_id": "synthetic",
+        }
+    ]
 
 
-def test_citations_only_include_used_support_spans(monkeypatch) -> None:
+def test_chunk_answerer_does_not_rewrite_llm_answer_with_regex(monkeypatch) -> None:
     class FakeResponse:
         def raise_for_status(self) -> None:
             return None
 
         def json(self):
-            return {"choices": [{"message": {"content": "根据你的个人知识库，乙方又称小乙。[S2]"}}]}
+            return {
+                "choices": [
+                    {
+                        "message": {
+                            "content": (
+                                "根据你的个人知识库，ShowMaker 是世界第一中单；"
+                                "ShowMaker 的圣经是重铸LCK荣光我辈义不容辞。[1]"
+                            )
+                        }
+                    }
+                ],
+                "usage": {"total_tokens": 24},
+            }
 
-    def fake_post(url, *, json, headers, timeout):
+    def fake_post(*args, **kwargs):
         return FakeResponse()
 
     import legal_rag.llm_answer as llm_answer_module
@@ -830,7 +741,11 @@ def test_citations_only_include_used_support_spans(monkeypatch) -> None:
         title="Synthetic Note",
         citation="Synthetic Note v1",
         jurisdiction="PERSONAL",
-        text="甲方是选手。乙方又称小乙。",
+        text=(
+            "ShowMaker是世界第一中单，炫狗是他的儿子。"
+            "ShowMaker的圣经是重铸LCK荣光我辈义不容辞。"
+            "炫神，又被称为炫狗。"
+        ),
         fusion_score=0.1,
     )
 
@@ -840,11 +755,14 @@ def test_citations_only_include_used_support_spans(monkeypatch) -> None:
             base_url="https://api.example.com/v1",
             model="example-model",
         )
-    ).generate("乙方别名是什么", [hit])
+    ).generate("英雄联盟世界第一中单是谁，他有什么成就", [hit])
 
-    assert result["refused"] is False
-    assert result["grounding"]["used_support_span_ids"] == ["S2"]
-    assert [citation["support_span_id"] for citation in result["citations"]] == ["S2"]
+    assert result["answer"] == (
+        "根据你的个人知识库，ShowMaker 是世界第一中单；"
+        "ShowMaker 的圣经是重铸LCK荣光我辈义不容辞。[1]"
+    )
+    assert result["retry_reason"] is None
+    assert result["citations"][0]["rank"] == 1
 
 
 def test_location_classification_cues_take_precedence_over_causal_reason_cue() -> None:
@@ -1166,8 +1084,8 @@ def test_causal_question_refuses_when_evidence_has_no_reason(monkeypatch) -> Non
         "matched_cues": [],
         "missing_evidence": ["cause"],
     }
-    assert "support_spans" in result["grounding"]
-    assert "answer_units" in result["grounding"]
+    assert result["grounding"]["context_hit_count"] == 1
+    assert result["grounding"]["relevant_hit_count"] == 0
     assert "没有明确说明原因" in result["answer"]
 
 

@@ -40,22 +40,22 @@ try {
 
     function Ingest-PersonalTest {
         Start-Qdrant
-        Invoke-Checked docker compose run --rm -e QDRANT_COLLECTION=$Collection cli legal-rag ingest --manifest $Manifest
+        Invoke-Checked docker compose run --rm -e QDRANT_COLLECTION=$Collection cli personal-notes-rag ingest --manifest $Manifest
     }
 
     function Retrieve-PersonalTest {
         Start-Qdrant
-        Invoke-Checked docker compose run --rm -e QDRANT_COLLECTION=$Collection cli legal-rag retrieve $Query --debug
+        Invoke-Checked docker compose run --rm -e QDRANT_COLLECTION=$Collection cli personal-notes-rag retrieve $Query --debug
     }
 
     function Ask-PersonalTest {
         Start-Qdrant
-        Invoke-Checked docker compose run --rm -e QDRANT_COLLECTION=$Collection cli legal-rag ask $Query
+        Invoke-Checked docker compose run --rm -e QDRANT_COLLECTION=$Collection cli personal-notes-rag ask $Query
     }
 
     function Eval-PersonalTest {
         Start-Qdrant
-        Invoke-Checked docker compose run --rm -e QDRANT_COLLECTION=$Collection cli legal-rag eval-retrieval --eval-set $EvalSet --manifest $Manifest
+        Invoke-Checked docker compose run --rm -e QDRANT_COLLECTION=$Collection cli personal-notes-rag eval-retrieval --eval-set $EvalSet --manifest $Manifest
     }
 
     switch ($Action) {

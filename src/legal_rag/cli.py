@@ -18,7 +18,7 @@ from legal_rag.factory import build_retriever, build_rewriter, build_store
 from legal_rag.ingest import ingest_manifest
 from legal_rag.observability import find_trace, read_trace_array, summarize_traces
 
-app = typer.Typer(help="Legal RAG CLI")
+app = typer.Typer(help="Personal Notes RAG Project CLI")
 trace_app = typer.Typer(help="Inspect local evidence traces")
 app.add_typer(trace_app, name="trace")
 DEFAULT_MANIFEST = ROOT_DIR / "configs" / "legal_sources.yml"

@@ -1,7 +1,9 @@
+name: personal-notes-rag-project
+
 services:
   qdrant:
     image: qdrant/qdrant:v1.10.1
-    container_name: legal-rag-qdrant
+    container_name: personal-notes-rag-qdrant
     ports:
       - "6333:6333"
       - "6334:6334"
@@ -14,10 +16,10 @@ services:
       args:
         INSTALL_MODEL_EXTRAS: ${INSTALL_MODEL_EXTRAS:-false}
         INSTALL_DEV: "false"
-    container_name: legal-rag-api
+    container_name: personal-notes-rag-api
     environment:
       QDRANT_URL: http://qdrant:6333
-      QDRANT_COLLECTION: ${QDRANT_COLLECTION:-legal_rag}
+      QDRANT_COLLECTION: ${QDRANT_COLLECTION:-personal_notes_rag}
       STORE_BACKEND: ${STORE_BACKEND:-qdrant}
       CORPUS_MANIFEST: ${CORPUS_MANIFEST:-/app/configs/legal_sources.yml}
       EMBEDDING_BACKEND: ${EMBEDDING_BACKEND:-fastembed}
@@ -67,10 +69,10 @@ services:
       args:
         INSTALL_MODEL_EXTRAS: ${INSTALL_MODEL_EXTRAS:-false}
         INSTALL_DEV: "false"
-    container_name: legal-rag-cli
+    container_name: personal-notes-rag-cli
     environment:
       QDRANT_URL: http://qdrant:6333
-      QDRANT_COLLECTION: ${QDRANT_COLLECTION:-legal_rag}
+      QDRANT_COLLECTION: ${QDRANT_COLLECTION:-personal_notes_rag}
       STORE_BACKEND: ${STORE_BACKEND:-qdrant}
       CORPUS_MANIFEST: ${CORPUS_MANIFEST:-/app/configs/legal_sources.yml}
       EMBEDDING_BACKEND: ${EMBEDDING_BACKEND:-fastembed}
@@ -108,7 +110,7 @@ services:
       - ./configs:/app/configs:ro
       - ./data:/app/data:ro
       - ./runtime/traces:/app/runtime/traces
-    command: ["legal-rag", "--help"]
+    command: ["personal-notes-rag", "--help"]
 
   test:
     build:
@@ -116,7 +118,7 @@ services:
       args:
         INSTALL_MODEL_EXTRAS: "false"
         INSTALL_DEV: "true"
-    container_name: legal-rag-test
+    container_name: personal-notes-rag-test
     environment:
       QDRANT_URL: http://qdrant:6333
       STORE_BACKEND: qdrant
@@ -133,7 +135,7 @@ services:
 
   ollama:
     image: ollama/ollama:latest
-    container_name: legal-rag-ollama
+    container_name: personal-notes-rag-ollama
     profiles: ["llm"]
     ports:
       - "11434:11434"

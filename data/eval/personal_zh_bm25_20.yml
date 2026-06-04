@@ -133,6 +133,13 @@ queries:
   - id: zh-real-showmaker-achievement-compound
     query: "英雄联盟世界第一中单是谁，他有什么成就"
     expected_terms: ["ShowMaker", "世界第一中单", "重铸LCK荣光我辈义不容辞"]
-    forbidden_claim_patterns: ["ShowMaker.{0,12}(又被称为|又称|也叫|也称|别名).{0,12}(炫神|炫狗)", "ShowMaker.{0,20}(冠军|数据|荣誉)"]
+    forbidden_claim_patterns: ["ShowMaker.{0,12}(又被称为|被称为|又称|也叫|也称|别名).{0,12}(炫神|炫狗)", "ShowMaker.{0,20}(冠军|数据|荣誉)"]
     category: compound_factual
     tags: ["real_user", "entity_binding", "partial_answer", "regression"]
+
+  - id: zh-real-faker-context-pronoun
+    query: "Faker是谁"
+    expected_terms: ["Faker", "炫神", "父亲"]
+    forbidden_claim_patterns: ["Faker.{0,20}ShowMaker最孝顺", "Faker.{0,12}(又被称为|又称|也叫|也称|别名).{0,12}(炫神|炫狗)"]
+    category: people
+    tags: ["real_user", "pronoun_resolution", "chunk_context", "regression"]

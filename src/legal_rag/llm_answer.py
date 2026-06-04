@@ -55,17 +55,6 @@ LIST_QUESTION_CUES = ("有哪些", "哪些", "列出", "包括", "list", "which"
 DEFINITION_QUESTION_CUES = ("是什么", "什么意思", "定义", "叫啥", "what is", "define", "meaning")
 FACTUAL_QUESTION_CUES = ("是谁", "谁", "哪里", "是否", "什么关系", "啥关系", "who", "where")
 RELATION_QUESTION_CUES = ("什么关系", "啥关系", "跟", "和", "与", "relationship")
-RELATION_ANSWER_CUES = (
-    "兄弟",
-    "大哥",
-    "结拜",
-    "父亲",
-    "母亲",
-    "儿子",
-    "女儿",
-    "孝顺",
-    "崇拜",
-)
 LOCATION_CLASSIFICATION_QUESTION_CUES = (
     "放哪",
     "记到哪",
@@ -336,73 +325,6 @@ QUERY_TERM_EXPANSIONS = {
     "老爹": ("父亲",),
     "干爹": ("父亲",),
 }
-CLAIM_RELATION_CUES = (
-    "又称",
-    "也称",
-    "也叫",
-    "别名",
-    "被称为",
-    "被描述为",
-    "父亲",
-    "母亲",
-    "兄弟",
-    "关系",
-    "成就",
-    "口号",
-    "最喜欢",
-    "第一中单",
-    "是",
-    " is ",
-    " are ",
-)
-MISSING_EVIDENCE_CUES = (
-    "缺少",
-    "没有",
-    "未提到",
-    "未提及",
-    "没有找到",
-    "材料不足",
-    "不足以",
-    "不能可靠回答",
-    "证据不足",
-    "insufficient",
-    "not enough",
-    "did not find",
-)
-CLAIM_TOKEN_STOPWORDS = {
-    "根据",
-    "你的",
-    "个人知识库",
-    "知识库",
-    "现有材料",
-    "材料",
-    "来看",
-    "可以",
-    "说明",
-    "提到",
-    "只提到",
-    "描述",
-    "被描述为",
-    "被称为",
-    "又称",
-    "也称",
-    "也叫",
-    "别名",
-    "父亲",
-    "母亲",
-    "兄弟",
-    "关系",
-    "成就",
-    "口号",
-    "证据",
-    "依据",
-    "当前",
-    "支持",
-    "回答",
-    "没有",
-    "未提到",
-    "未提及",
-}
 
 
 @dataclass(frozen=True)
@@ -452,46 +374,6 @@ class ChatCompletionCallError(RuntimeError):
         self.original = exc
         self.retry_count = retry_count
         self.retry_reason = retry_reason
-
-
-@dataclass(frozen=True)
-class SupportSpan:
-    span_id: str
-    hit_rank: int
-    chunk_id: str
-    source_id: str
-    title: str
-    citation: str
-    text: str
-
-    def as_dict(self) -> dict[str, Any]:
-        return {
-            "span_id": self.span_id,
-            "hit_rank": self.hit_rank,
-            "chunk_id": self.chunk_id,
-            "source_id": self.source_id,
-            "title": self.title,
-            "citation": self.citation,
-            "text": self.text,
-        }
-
-
-@dataclass(frozen=True)
-class ClaimCheck:
-    claim: str
-    support_span_ids: list[str]
-    supported: bool
-    missing_terms: list[str] = field(default_factory=list)
-    reason: str | None = None
-
-    def as_dict(self) -> dict[str, Any]:
-        return {
-            "claim": self.claim,
-            "support_span_ids": self.support_span_ids,
-            "supported": self.supported,
-            "missing_terms": self.missing_terms,
-            "reason": self.reason,
-        }
 
 
 @dataclass(frozen=True)
@@ -664,8 +546,6 @@ class OpenAICompatibleAnswerer:
     def generate(self, question: str, hits: list[RetrievalHit]) -> dict[str, Any]:
         started = time.perf_counter()
         grounding = self.answerability_gate.evaluate(question, hits)
-        support_spans = select_support_spans(question, hits, grounding=grounding)
-        grounding = refine_grounding_for_answer_units(question, grounding, support_spans)
         if not hits:
             return {
                 "enabled": True,
@@ -675,7 +555,7 @@ class OpenAICompatibleAnswerer:
                 "answer_status": "refused",
                 "answer": NO_EVIDENCE_ANSWER,
                 "citations": [],
-                "grounding": _grounding_payload(grounding, support_spans, question=question),
+                "grounding": _grounding_payload(grounding, hits),
                 "llm": self.config.safe_dict(),
                 "usage": None,
                 "duration_ms": _elapsed_ms(started),
@@ -691,7 +571,7 @@ class OpenAICompatibleAnswerer:
                 "answer_status": "refused",
                 "answer": refusal_answer_for(grounding),
                 "citations": [],
-                "grounding": _grounding_payload(grounding, support_spans, question=question),
+                "grounding": _grounding_payload(grounding, hits),
                 "llm": self.config.safe_dict(),
                 "usage": None,
                 "duration_ms": _elapsed_ms(started),
@@ -707,46 +587,17 @@ class OpenAICompatibleAnswerer:
                 "answer_status": "error",
                 "answer": None,
                 "citations": [],
-                "grounding": _grounding_payload(grounding, support_spans, question=question),
+                "grounding": _grounding_payload(grounding, hits),
                 "llm": self.config.safe_dict(),
                 "usage": None,
                 "duration_ms": _elapsed_ms(started),
                 "error": "base_url and model are required",
             }
 
-        if grounding.answer_mode == "partial_compound":
-            answer, used_span_ids = build_extractive_answer(question, support_spans, grounding)
-            claim_checks = validate_grounded_claims(answer, support_spans, grounding=grounding)
-            unsupported_claims = [check for check in claim_checks if not check.supported]
-            return {
-                "enabled": True,
-                "skipped": False,
-                "reason": "partial_compound_extractive",
-                "refused": False,
-                "answer_status": grounding.answer_status,
-                "answer": answer,
-                "citations": _citations_for_spans(support_spans, used_span_ids),
-                "grounding": _grounding_payload(
-                    grounding,
-                    support_spans,
-                    question=question,
-                    claim_checks=claim_checks,
-                    unsupported_claims=unsupported_claims,
-                    used_span_ids=used_span_ids,
-                ),
-                "llm": self.config.safe_dict(),
-                "usage": None,
-                "duration_ms": _elapsed_ms(started),
-                "retry_count": 0,
-                "retry_reason": None,
-                "recovered_from_thinking": False,
-                "error": None,
-            }
-
         try:
             chat = _chat_completion_with_recovery(
                 self.config,
-                messages=_build_messages(question, support_spans, grounding=grounding),
+                messages=_build_messages(question, hits, grounding=grounding),
             )
             data = chat.data
             answer = chat.answer
@@ -756,15 +607,15 @@ class OpenAICompatibleAnswerer:
             if not answer:
                 return _empty_model_response_result(
                     started=started,
-                    grounding=_grounding_payload(grounding, support_spans, question=question),
+                    grounding=_grounding_payload(grounding, hits),
                     llm=self.config.safe_dict(),
-                    citations=_citations_for_spans(support_spans, []),
+                    citations=[],
                     chat=chat,
                 )
             if _should_retry_llm_refusal(grounding, answer):
                 retry_chat = _chat_completion_with_recovery(
                     self.config,
-                    messages=_build_messages(question, support_spans, grounding=grounding, retry=True),
+                    messages=_build_messages(question, hits, grounding=grounding, retry=True),
                 )
                 retry_count += 1 + retry_chat.retry_count
                 retry_reason = _join_retry_reasons(
@@ -780,9 +631,9 @@ class OpenAICompatibleAnswerer:
                 if not answer:
                     return _empty_model_response_result(
                         started=started,
-                        grounding=_grounding_payload(grounding, support_spans, question=question),
+                        grounding=_grounding_payload(grounding, hits),
                         llm=self.config.safe_dict(),
-                        citations=_citations_for_spans(support_spans, []),
+                        citations=[],
                         chat=retry_chat,
                         retry_count=retry_count,
                         retry_reason=retry_reason,
@@ -790,62 +641,6 @@ class OpenAICompatibleAnswerer:
                     )
 
             if _should_return_llm_refusal(grounding, answer):
-                contextual_answer, used_span_ids = _contextual_definition_extractive_answer(
-                    question,
-                    support_spans,
-                    grounding=grounding,
-                )
-                if contextual_answer:
-                    return {
-                        "enabled": True,
-                        "skipped": False,
-                        "reason": "contextual_definition_extractive",
-                        "refused": False,
-                        "answer_status": grounding.answer_status,
-                        "answer": contextual_answer,
-                        "citations": _citations_for_spans(support_spans, used_span_ids),
-                        "grounding": _grounding_payload(
-                            grounding,
-                            support_spans,
-                            question=question,
-                            used_span_ids=used_span_ids,
-                        ),
-                        "llm": self.config.safe_dict(),
-                        "usage": data.get("usage") if isinstance(data, dict) else None,
-                        "duration_ms": _elapsed_ms(started),
-                        "retry_count": retry_count,
-                        "retry_reason": retry_reason,
-                        "recovered_from_thinking": recovered_from_thinking,
-                        "error": None,
-                    }
-                if grounding.answer_mode != "refuse" and support_spans:
-                    answer, used_span_ids = build_extractive_answer(question, support_spans, grounding)
-                    claim_checks = validate_grounded_claims(answer, support_spans, grounding=grounding)
-                    unsupported_claims = [check for check in claim_checks if not check.supported]
-                    return {
-                        "enabled": True,
-                        "skipped": False,
-                        "reason": "llm_refusal_extractive",
-                        "refused": False,
-                        "answer_status": grounding.answer_status,
-                        "answer": answer,
-                        "citations": _citations_for_spans(support_spans, used_span_ids),
-                        "grounding": _grounding_payload(
-                            grounding,
-                            support_spans,
-                            question=question,
-                            claim_checks=claim_checks,
-                            unsupported_claims=unsupported_claims,
-                            used_span_ids=used_span_ids,
-                        ),
-                        "llm": self.config.safe_dict(),
-                        "usage": data.get("usage") if isinstance(data, dict) else None,
-                        "duration_ms": _elapsed_ms(started),
-                        "retry_count": retry_count,
-                        "retry_reason": retry_reason,
-                        "recovered_from_thinking": recovered_from_thinking,
-                        "error": None,
-                    }
                 return {
                     "enabled": True,
                     "skipped": False,
@@ -854,7 +649,7 @@ class OpenAICompatibleAnswerer:
                     "answer_status": "llm_refused",
                     "answer": LLM_REFUSED_ANSWER,
                     "citations": [],
-                    "grounding": _grounding_payload(grounding, support_spans, question=question),
+                    "grounding": _grounding_payload(grounding, hits),
                     "llm": self.config.safe_dict(),
                     "usage": data.get("usage") if isinstance(data, dict) else None,
                     "duration_ms": _elapsed_ms(started),
@@ -864,105 +659,6 @@ class OpenAICompatibleAnswerer:
                     "error": None,
                 }
 
-            if _should_prefer_contextual_definition_extractive_answer(question, grounding):
-                contextual_answer, used_span_ids = _contextual_definition_extractive_answer(
-                    question,
-                    support_spans,
-                    grounding=grounding,
-                    relation_only=True,
-                )
-                if contextual_answer:
-                    return {
-                        "enabled": True,
-                        "skipped": False,
-                        "reason": "contextual_definition_extractive",
-                        "refused": False,
-                        "answer_status": grounding.answer_status,
-                        "answer": contextual_answer,
-                        "citations": _citations_for_spans(support_spans, used_span_ids),
-                        "grounding": _grounding_payload(
-                            grounding,
-                            support_spans,
-                            question=question,
-                            used_span_ids=used_span_ids,
-                        ),
-                        "llm": self.config.safe_dict(),
-                        "usage": data.get("usage") if isinstance(data, dict) else None,
-                        "duration_ms": _elapsed_ms(started),
-                        "retry_count": retry_count,
-                        "retry_reason": retry_reason,
-                        "recovered_from_thinking": recovered_from_thinking,
-                        "error": None,
-                    }
-
-            claim_checks = validate_grounded_claims(answer, support_spans, grounding=grounding)
-            unsupported_claims = [check for check in claim_checks if not check.supported]
-            if unsupported_claims:
-                retry_chat = _chat_completion_with_recovery(
-                    self.config,
-                    messages=_build_messages(
-                        question,
-                        support_spans,
-                        grounding=grounding,
-                        retry=True,
-                        unsupported_claims=unsupported_claims,
-                    ),
-                )
-                retry_count += 1 + retry_chat.retry_count
-                retry_reason = _join_retry_reasons(
-                    retry_reason,
-                    retry_chat.retry_reason,
-                    "unsupported_claim",
-                )
-                recovered_from_thinking = (
-                    recovered_from_thinking or retry_chat.recovered_from_thinking
-                )
-                data = retry_chat.data
-                answer = retry_chat.answer
-                if not answer:
-                    return _empty_model_response_result(
-                        started=started,
-                        grounding=_grounding_payload(grounding, support_spans, question=question),
-                        llm=self.config.safe_dict(),
-                        citations=_citations_for_spans(support_spans, []),
-                        chat=retry_chat,
-                        retry_count=retry_count,
-                        retry_reason=retry_reason,
-                        recovered_from_thinking=recovered_from_thinking,
-                    )
-                claim_checks = validate_grounded_claims(answer, support_spans, grounding=grounding)
-                unsupported_claims = [check for check in claim_checks if not check.supported]
-
-            if unsupported_claims:
-                answer, used_span_ids = build_extractive_answer(question, support_spans, grounding)
-                claim_checks = validate_grounded_claims(answer, support_spans, grounding=grounding)
-                unsupported_claims = [check for check in claim_checks if not check.supported]
-                return {
-                    "enabled": True,
-                    "skipped": False,
-                    "reason": "unsupported_claim_fallback",
-                    "refused": False,
-                    "answer_status": "partial" if grounding.answer_status == "partial" else "answered",
-                    "answer": answer,
-                    "citations": _citations_for_spans(support_spans, used_span_ids),
-                    "grounding": _grounding_payload(
-                        grounding,
-                        support_spans,
-                        question=question,
-                        claim_checks=claim_checks,
-                        unsupported_claims=unsupported_claims,
-                        used_span_ids=used_span_ids,
-                    ),
-                    "llm": self.config.safe_dict(),
-                    "usage": data.get("usage") if isinstance(data, dict) else None,
-                    "duration_ms": _elapsed_ms(started),
-                    "retry_count": retry_count,
-                    "retry_reason": retry_reason,
-                    "recovered_from_thinking": recovered_from_thinking,
-                    "error": None,
-                }
-
-            used_span_ids = used_support_span_ids(answer, support_spans)
             return {
                 "enabled": True,
                 "skipped": False,
@@ -970,15 +666,8 @@ class OpenAICompatibleAnswerer:
                 "refused": False,
                 "answer_status": grounding.answer_status,
                 "answer": answer,
-                "citations": _citations_for_spans(support_spans, used_span_ids),
-                "grounding": _grounding_payload(
-                    grounding,
-                    support_spans,
-                    question=question,
-                    claim_checks=claim_checks,
-                    unsupported_claims=unsupported_claims,
-                    used_span_ids=used_span_ids,
-                ),
+                "citations": _citations(hits),
+                "grounding": _grounding_payload(grounding, hits),
                 "llm": self.config.safe_dict(),
                 "usage": data.get("usage") if isinstance(data, dict) else None,
                 "duration_ms": _elapsed_ms(started),
@@ -997,8 +686,8 @@ class OpenAICompatibleAnswerer:
                 "refused": False,
                 "answer_status": "error",
                 "answer": None,
-                "citations": _citations_for_spans(support_spans, []),
-                "grounding": _grounding_payload(grounding, support_spans, question=question),
+                "citations": [],
+                "grounding": _grounding_payload(grounding, hits),
                 "llm": self.config.safe_dict(),
                 "usage": None,
                 "duration_ms": _elapsed_ms(started),
@@ -1122,33 +811,22 @@ class GeneralKnowledgeAnswerer:
 
 def _build_messages(
     question: str,
-    support_spans: list[SupportSpan],
+    hits: list[RetrievalHit],
     *,
     grounding: AnswerabilityResult | None = None,
     retry: bool = False,
-    unsupported_claims: list[ClaimCheck] | None = None,
 ) -> list[dict[str, str]]:
-    evidence = "\n\n".join(_format_support_span(span) for span in support_spans[:8])
+    evidence = "\n\n".join(_format_evidence(index, hit) for index, hit in enumerate(hits[:8], 1))
     grounding = grounding or AnswerabilityResult(
         question_type=classify_question_type(question),
-        answerable=bool(support_spans),
-        checked_hit_count=len(support_spans),
+        answerable=bool(hits),
+        checked_hit_count=min(len(hits), 8),
         required_evidence="直接回答问题的检索证据",
         answer_mode="direct",
-        answer_status="answered" if support_spans else "refused",
-        missing_evidence=[] if support_spans else ["direct_evidence"],
+        answer_status="answered" if hits else "refused",
+        missing_evidence=[] if hits else ["direct_evidence"],
     )
-    unsupported_note = ""
-    if unsupported_claims:
-        bad_claims = "; ".join(check.claim for check in unsupported_claims[:3])
-        unsupported_note = (
-            "The previous answer contained unsupported claims: "
-            f"{bad_claims}. Remove any claim not directly supported by the cited support span. "
-            "Do not cite adjacent spans to combine unrelated facts. "
-        )
-    if unsupported_note:
-        retry_note = unsupported_note
-    elif retry and grounding.answer_mode == "contextual_definition":
+    if retry and grounding.answer_mode == "contextual_definition":
         retry_note = (
             "The previous answer treated this as requiring an encyclopedia definition. "
             "Use the evidence to explain what the entity means in the user's personal "
@@ -1180,9 +858,9 @@ def _build_messages(
             "role": "system",
             "content": (
                 "You are a grounded RAG answer layer. Answer only from the provided evidence. "
-                "Treat the support spans as the user's personal knowledge base. When the user asks in "
+                "Treat the evidence chunks as the user's personal knowledge base. When the user asks in "
                 "Chinese, prefer starting the answer with '根据你的个人知识库，'. "
-                "First decide whether the support spans directly answer, partially answer, or cannot "
+                "First decide whether the evidence chunks directly answer, partially answer, or cannot "
                 "answer the question. "
                 "The Question type, Answer mode, and Missing evidence fields are an upstream "
                 "answerability decision. If Answer mode is not 'refuse' and Missing evidence is "
@@ -1190,15 +868,29 @@ def _build_messages(
                 "evidence. Extract the directly supported answer instead. If Answer mode is "
                 "partial, provide the supported partial answer instead of refusing. "
                 "Use the same language as the user when possible. Cite claims with bracketed "
-                "support span ids like [S1] or [S2]. Every factual claim must be supported by the "
-                "cited support span. Do not cite a span unless that exact span supports the claim. "
-                "Preserve exact names, titles, metric names, and key phrases from the support spans "
+                "chunk ids like [1] or [2]. Every factual claim must be supported by the cited "
+                "chunk. Do not cite a chunk unless that chunk supports the claim. "
+                "Preserve exact names, titles, metric names, and key phrases from the evidence chunks "
                 "when they answer the question. "
+                "Use the complete chunk context to resolve pronouns, aliases, relations, and nearby "
+                "subject references. Do not discard relevant surrounding context inside the same chunk. "
                 "Keep the answer tightly focused on the entity and relation asked by the user. "
-                "Do not merge adjacent facts across support spans. If one source contains several "
-                "neighboring facts, include only the "
+                "Do not bind a neighboring fact to the wrong subject. If one source contains several "
+                "facts, include only the "
                 "fact that answers the requested slot; do not mention siblings, parents, songs, "
                 "reasons, aliases, or other adjacent facts unless the question asks for them. "
+                "When an entity appears inside a list, answer only the list relation for that entity; "
+                "do not attach later sentences about the list owner or another list member to it. "
+                "Only state that X is also known as, called, or aliased as Y when the same chunk "
+                "directly makes X the subject of that alias statement. If the alias sentence is about "
+                "a different subject, do not transfer that alias to the queried entity. "
+                "中文主体绑定规则："
+                "“A，又被称为B”只说明A的别名是B，不能说明相邻句里的C也叫A或B。"
+                "“他的父亲包括：A,B,C”只说明A/B/C是“他”的父亲列表成员；"
+                "后续“他对X最孝顺”里的“他”仍指前文主体，不指列表里的A/B/C。"
+                "如果用户问列表成员A是谁，只回答A与前文主体的列表关系，例如“A是某人的父亲之一”，"
+                "不要把后续关于前文主体的行为、偏好或别名写成A的事实。"
+                "如果用户问“某个称号/身份是谁”，只取直接包含该称号/身份的句子的主语作为答案。"
                 "For name questions, answer the name if present; if only a partial name clue is "
                 "present, state only that clue and say the full name is not in the evidence. "
                 f"{contextual_definition_instruction}"
@@ -1232,10 +924,10 @@ def _build_messages(
                 f"Answer mode:\n{grounding.answer_mode}\n\n"
                 f"Required evidence:\n{grounding.required_evidence}\n\n"
                 f"Missing evidence:\n{', '.join(grounding.missing_evidence) if grounding.missing_evidence else 'none'}\n\n"
-                f"Evidence support spans:\n{evidence}\n\n"
+                f"Evidence chunks:\n{evidence}\n\n"
                 "Answer by units when the question has multiple parts. If answerable, write a concise answer. If the answer mode is partial, write the "
                 "partial answer and explicitly frame it as based on current materials. Include "
-                "support span citations next to relevant claims. If not answerable from support spans, say what "
+                "chunk citations next to relevant claims. If not answerable from evidence chunks, say what "
                 "specific evidence is missing."
             ),
         },
@@ -1272,524 +964,16 @@ def _build_general_messages(question: str, *, fallback_from_kb: bool = False) ->
     ]
 
 
-def build_support_spans(hits: list[RetrievalHit], *, max_chars: int = 500) -> list[SupportSpan]:
-    spans: list[SupportSpan] = []
-    seen_texts: set[str] = set()
-    for hit_rank, hit in enumerate(hits[:8], 1):
-        for sentence in split_evidence_sentences(hit.text):
-            for text in _split_relation_clauses(sentence):
-                normalized = normalize_whitespace(text)
-                if not normalized:
-                    continue
-                dedupe_key = normalized.casefold()
-                if dedupe_key in seen_texts:
-                    continue
-                seen_texts.add(dedupe_key)
-                if len(normalized) > max_chars:
-                    normalized = normalized[:max_chars].rstrip() + "..."
-                spans.append(
-                    SupportSpan(
-                        span_id=f"S{len(spans) + 1}",
-                        hit_rank=hit_rank,
-                        chunk_id=hit.chunk_id,
-                        source_id=hit.source_id,
-                        title=hit.title,
-                        citation=hit.citation,
-                        text=normalized,
-                    )
-                )
-    return spans
-
-
-def select_support_spans(
-    question: str,
-    hits: list[RetrievalHit],
-    *,
-    grounding: AnswerabilityResult,
-    limit: int = 8,
-) -> list[SupportSpan]:
-    spans = build_support_spans(hits)
-    if not spans:
-        return []
-    terms = [
-        *evidence_query_terms(question),
-        *grounding.matched_cues,
-        *answer_unit_terms(question),
-    ]
-    terms = dedupe_preserve_order([term for term in terms if _is_valid_evidence_query_term(term.casefold())])
-    if not terms:
-        return spans[:limit]
-
-    scored: list[tuple[int, int, SupportSpan]] = []
-    for index, span in enumerate(spans):
-        score = _support_span_score(question, span, terms)
-        if score:
-            scored.append((score, -index, span))
-    if not scored:
-        return spans[:limit]
-    scored.sort(reverse=True)
-    selected = [span for _, _, span in scored[:limit]]
-    return _expand_support_spans_with_bridge_terms(selected, spans, limit=limit)
-
-
-def refine_grounding_for_answer_units(
-    question: str,
-    grounding: AnswerabilityResult,
-    support_spans: list[SupportSpan],
-) -> AnswerabilityResult:
-    if not grounding.answerable or grounding.answer_status != "answered":
-        return grounding
-    units = split_answer_units(question)
-    if len(units) <= 1:
-        return grounding
-    matched_units = 0
-    missing_units = 0
-    for unit in units:
-        if _matched_span_ids_for_unit(unit, support_spans):
-            matched_units += 1
-        else:
-            missing_units += 1
-    if matched_units == 0 or missing_units == 0:
-        return grounding
-    missing_evidence = dedupe_preserve_order([*grounding.missing_evidence, "answer_unit_evidence"])
-    return replace(
-        grounding,
-        answer_status="partial",
-        answer_mode="partial_compound",
-        missing_evidence=missing_evidence,
-        required_evidence=f"{grounding.required_evidence}; 每个子问题的直接支持片段",
-    )
-
-
-def answer_unit_terms(question: str) -> list[str]:
-    terms: list[str] = []
-    for unit in split_answer_units(question):
-        terms.extend(extract_query_terms(unit))
-        terms.extend(tokenize(unit))
-    return _valid_evidence_query_terms(terms)
-
-
-def split_answer_units(question: str) -> list[str]:
-    normalized = normalize_whitespace(question)
-    parts = [
-        part.strip()
-        for part in re.split(r"[？?。；;]|(?:，|,)(?=[^，,。；;？?]{1,40}(?:谁|什么|哪些|哪|为什么|为何|为啥|how|what|who|which))", normalized)
-        if part.strip()
-    ]
-    return parts or [normalized]
-
-
-def validate_grounded_claims(
-    answer: str,
-    support_spans: list[SupportSpan],
-    *,
-    grounding: AnswerabilityResult,
-) -> list[ClaimCheck]:
-    if not answer:
-        return []
-    if grounding.question_type in {"evaluative", "summary", "list", "procedural"}:
-        return []
-    checks: list[ClaimCheck] = []
-    span_by_id = {span.span_id: span for span in support_spans}
-    for claim in split_answer_claims(answer):
-        if _is_missing_evidence_statement(claim):
-            checks.append(ClaimCheck(claim=claim, support_span_ids=used_support_span_ids(claim, support_spans), supported=True))
-            continue
-        cited_ids = used_support_span_ids(claim, support_spans)
-        if not cited_ids:
-            checks.append(
-                ClaimCheck(
-                    claim=claim,
-                    support_span_ids=[],
-                    supported=False,
-                    reason="missing_support_citation",
-                )
-            )
-            continue
-        if grounding.question_type == "exact":
-            claim_without_citations = re.sub(r"\[(?:S)?\d+\]", " ", claim, flags=re.IGNORECASE)
-            missing_numbers = [
-                number
-                for number in re.findall(r"\d+(?:\.\d+)?", claim_without_citations)
-                if not _term_in_any_cited_span(number, cited_ids, span_by_id)
-            ]
-            checks.append(
-                ClaimCheck(
-                    claim=claim,
-                    support_span_ids=cited_ids,
-                    supported=not missing_numbers,
-                    missing_terms=missing_numbers,
-                    reason=None if not missing_numbers else "missing_exact_value_in_cited_span",
-                )
-            )
-            continue
-        if not _looks_like_relation_claim(claim):
-            checks.append(ClaimCheck(claim=claim, support_span_ids=cited_ids, supported=True))
-            continue
-        terms = claim_key_terms(claim)
-        support_span_id = _single_span_supporting_terms(terms, cited_ids, span_by_id)
-        checks.append(
-            ClaimCheck(
-                claim=claim,
-                support_span_ids=cited_ids,
-                supported=support_span_id is not None,
-                missing_terms=[] if support_span_id else _missing_terms_from_single_span(terms, cited_ids, span_by_id),
-                reason=None if support_span_id else "relation_terms_not_supported_by_one_span",
-            )
-        )
-    return checks
-
-
-def build_extractive_answer(
-    question: str,
-    support_spans: list[SupportSpan],
-    grounding: AnswerabilityResult,
-) -> tuple[str, list[str]]:
-    if not support_spans:
-        return NO_EVIDENCE_ANSWER, []
-    units = split_answer_units(question)
-    used: list[str] = []
-    pieces: list[str] = []
-    for unit in units:
-        unit_terms = _valid_evidence_query_terms([*extract_query_terms(unit), *tokenize(unit)])
-        selected = _best_span_for_terms(support_spans, unit_terms, exclude=used)
-        if selected is None and used:
-            selected = _bridge_span_for_used_spans(support_spans, used)
-        if selected:
-            used.append(selected.span_id)
-            pieces.append(selected.text)
-    if not pieces:
-        selected = support_spans[0]
-        used.append(selected.span_id)
-        pieces.append(selected.text)
-    missing_note = ""
-    if grounding.answer_status == "partial" and _looks_chinese(question):
-        missing_note = "但材料不足以完整回答全部问题。"
-    elif grounding.answer_status == "partial":
-        missing_note = "The materials do not fully answer every part."
-    prefix = "根据你的个人知识库，" if _looks_chinese(question) else "Based on your knowledge base, "
-    statements = [
-        f"{piece.rstrip('。！？!?；;')} [{span_id}]。"
-        for piece, span_id in zip(pieces, used, strict=False)
-    ]
-    if missing_note:
-        statements.append(missing_note)
-    return f"{prefix}{' '.join(statements)}", used
-
-
-def _best_span_for_terms(
-    support_spans: list[SupportSpan],
-    terms: list[str],
-    *,
-    exclude: list[str],
-) -> SupportSpan | None:
-    if not terms:
-        return next((span for span in support_spans if span.span_id not in exclude), None)
-    scored: list[tuple[int, int, SupportSpan]] = []
-    for index, span in enumerate(support_spans):
-        if span.span_id in exclude:
-            continue
-        score = _support_span_score("", span, terms)
-        if score:
-            scored.append((score, -index, span))
-    if not scored:
-        return None
-    scored.sort(reverse=True)
-    return scored[0][2]
-
-
-def _support_span_score(question: str, span: SupportSpan, terms: list[str]) -> int:
-    text = span.text.casefold()
-    score = sum(1 for term in terms if term.casefold() in text)
-    if question and _contains_any(question.casefold(), RELATION_QUESTION_CUES):
-        score += sum(1 for cue in RELATION_ANSWER_CUES if cue.casefold() in text)
-    return score
-
-
-def _bridge_span_for_used_spans(
-    support_spans: list[SupportSpan],
-    used_ids: list[str],
-) -> SupportSpan | None:
-    used_spans = [span for span in support_spans if span.span_id in used_ids]
-    bridge_terms = _bridge_terms_from_spans(used_spans)
-    if not bridge_terms:
-        return None
-    for span in support_spans:
-        if span.span_id in used_ids:
-            continue
-        if any(_span_is_about_bridge_term(span.text, term) for term in bridge_terms):
-            return span
-    return None
-
-
-def _format_support_span(span: SupportSpan) -> str:
-    return (
-        f"[{span.span_id}] {span.title}\n"
-        f"Citation: {span.citation}\n"
-        f"Source: {span.source_id}\n"
-        f"Chunk: {span.chunk_id}\n"
-        f"Text: {span.text}"
-    )
-
-
-def _citations_for_spans(support_spans: list[SupportSpan], used_ids: list[str]) -> list[dict[str, Any]]:
-    if not used_ids:
-        return []
-    output: list[dict[str, Any]] = []
-    seen: set[str] = set()
-    for index, span in enumerate(support_spans, 1):
-        if span.span_id not in used_ids or span.span_id in seen:
-            continue
-        output.append(
-            {
-                "rank": index,
-                "title": span.title,
-                "citation": span.citation,
-                "chunk_id": span.chunk_id,
-                "source_id": span.source_id,
-                "support_span_id": span.span_id,
-                "support_text": span.text,
-            }
-        )
-        seen.add(span.span_id)
-    return output
-
-
-def _grounding_payload(
-    grounding: AnswerabilityResult,
-    support_spans: list[SupportSpan],
-    *,
-    question: str | None = None,
-    claim_checks: list[ClaimCheck] | None = None,
-    unsupported_claims: list[ClaimCheck] | None = None,
-    used_span_ids: list[str] | None = None,
-) -> dict[str, Any]:
+def _grounding_payload(grounding: AnswerabilityResult, hits: list[RetrievalHit]) -> dict[str, Any]:
     payload = grounding.as_dict()
+    context_hit_count = min(len(hits), 8)
     payload.update(
         {
-            "answer_units": build_answer_units(question, grounding, support_spans),
-            "support_spans": [span.as_dict() for span in support_spans],
-            "claim_checks": [check.as_dict() for check in claim_checks or []],
-            "unsupported_claims": [check.as_dict() for check in unsupported_claims or []],
-            "used_support_span_ids": used_span_ids or [],
+            "context_hit_count": context_hit_count,
+            "relevant_hit_count": context_hit_count if grounding.answerable else 0,
         }
     )
     return payload
-
-
-def build_answer_units(
-    question: str | None,
-    grounding: AnswerabilityResult,
-    support_spans: list[SupportSpan],
-) -> list[dict[str, Any]]:
-    units = split_answer_units(question or "") if question else [""]
-    output: list[dict[str, Any]] = []
-    for index, unit in enumerate(units, 1):
-        matched_span_ids = _matched_span_ids_for_unit(unit, support_spans)
-        if matched_span_ids:
-            status = "answered"
-            missing = []
-        else:
-            status = "no_evidence"
-            missing = ["unit_evidence"]
-        output.append(
-            {
-                "unit_id": f"U{index}",
-                "question": unit,
-                "question_type": classify_question_type(unit) if unit else grounding.question_type,
-                "status": status,
-                "answer_mode": grounding.answer_mode,
-                "missing_evidence": missing,
-                "matched_support_span_ids": matched_span_ids,
-            }
-        )
-    return output
-
-
-def _matched_span_ids_for_unit(unit: str, support_spans: list[SupportSpan]) -> list[str]:
-    unit_terms = _valid_evidence_query_terms([*extract_query_terms(unit), *tokenize(unit)])
-    if not unit_terms:
-        return [span.span_id for span in support_spans]
-    return [
-        span.span_id
-        for span in support_spans
-        if any(term.casefold() in span.text.casefold() for term in unit_terms)
-    ]
-
-
-def _expand_support_spans_with_bridge_terms(
-    selected: list[SupportSpan],
-    all_spans: list[SupportSpan],
-    *,
-    limit: int,
-) -> list[SupportSpan]:
-    output: list[SupportSpan] = []
-    seen: set[str] = set()
-    for span in selected:
-        if span.span_id in seen:
-            continue
-        output.append(span)
-        seen.add(span.span_id)
-        if len(output) >= limit:
-            return output
-
-    bridge_terms = _bridge_terms_from_spans(selected)
-    if not bridge_terms:
-        return output
-    selected_hit_ranks = {span.hit_rank for span in selected}
-    for span in all_spans:
-        if span.span_id in seen or span.hit_rank not in selected_hit_ranks:
-            continue
-        if any(_span_is_about_bridge_term(span.text, term) for term in bridge_terms):
-            output.append(span)
-            seen.add(span.span_id)
-            if len(output) >= limit:
-                break
-    return output
-
-
-def _bridge_terms_from_spans(spans: list[SupportSpan]) -> list[str]:
-    terms: list[str] = []
-    for span in spans:
-        terms.extend(re.findall(r"[A-Za-z][A-Za-z0-9_-]{2,}", span.text))
-    return dedupe_preserve_order([term for term in terms if term.casefold() not in CLAIM_TOKEN_STOPWORDS])
-
-
-def _span_is_about_bridge_term(text: str, term: str) -> bool:
-    normalized = normalize_whitespace(text)
-    if not normalized:
-        return False
-    escaped = re.escape(term)
-    return bool(
-        re.search(
-            rf"^(?:关于|有关|提到)?\s*{escaped}(?:\s|$|[，,。；;：:]|是|的|被|又|也|在)",
-            normalized,
-            flags=re.IGNORECASE,
-        )
-    )
-
-
-def used_support_span_ids(answer: str, support_spans: list[SupportSpan]) -> list[str]:
-    valid = {span.span_id for span in support_spans}
-    output: list[str] = []
-    for match in re.finditer(r"\[(?:S)?(\d+)\]", answer, flags=re.IGNORECASE):
-        span_id = f"S{int(match.group(1))}"
-        if span_id in valid and span_id not in output:
-            output.append(span_id)
-    return output
-
-
-def split_answer_claims(answer: str) -> list[str]:
-    normalized = normalize_whitespace(answer)
-    normalized = re.sub(
-        r"([。！？!?；;])\s*((?:\[(?:S)?\d+\]\s*)+)",
-        r" \2\1",
-        normalized,
-        flags=re.IGNORECASE,
-    )
-    parts = re.split(r"(?<=[。！？!?；;])\s+|\n+", normalized)
-    return [part.strip() for part in parts if part.strip()]
-
-
-def _split_relation_clauses(sentence: str) -> list[str]:
-    normalized = normalize_whitespace(sentence)
-    if "," in normalized and re.search(r"(包括|包含|有|列出)[:：][^。！？!?；;]+,", normalized):
-        return [normalized]
-    delimiters = "，,"
-    if not any(delimiter in normalized for delimiter in delimiters):
-        return [normalized]
-    parts = [part.strip() for part in re.split(r"[，,]", normalized) if part.strip()]
-    if len(parts) <= 1:
-        return [normalized]
-    relation_parts = sum(1 for part in parts if _looks_like_relation_claim(part) or part.startswith(("因为", "由于", "所以")))
-    if relation_parts >= 2:
-        return parts
-    return [normalized]
-
-
-def _term_in_any_cited_span(term: str, span_ids: list[str], span_by_id: dict[str, SupportSpan]) -> bool:
-    key = term.casefold()
-    return any(key in span_by_id[span_id].text.casefold() for span_id in span_ids if span_id in span_by_id)
-
-
-def _single_span_supporting_terms(
-    terms: list[str],
-    span_ids: list[str],
-    span_by_id: dict[str, SupportSpan],
-) -> str | None:
-    if not terms:
-        return span_ids[0] if span_ids else None
-    for span_id in span_ids:
-        span = span_by_id.get(span_id)
-        if not span:
-            continue
-        text = span.text.casefold()
-        if all(term.casefold() in text for term in terms):
-            return span_id
-    return None
-
-
-def _missing_terms_from_single_span(
-    terms: list[str],
-    span_ids: list[str],
-    span_by_id: dict[str, SupportSpan],
-) -> list[str]:
-    if not terms:
-        return []
-    best_supported = 0
-    best_missing = terms
-    for span_id in span_ids:
-        span = span_by_id.get(span_id)
-        if not span:
-            continue
-        text = span.text.casefold()
-        supported = [term for term in terms if term.casefold() in text]
-        missing = [term for term in terms if term.casefold() not in text]
-        if len(supported) > best_supported:
-            best_supported = len(supported)
-            best_missing = missing
-    return best_missing
-
-
-def _is_missing_evidence_statement(claim: str) -> bool:
-    normalized = claim.casefold()
-    return any(cue.casefold() in normalized for cue in MISSING_EVIDENCE_CUES)
-
-
-def _looks_like_relation_claim(claim: str) -> bool:
-    normalized = claim.casefold()
-    return any(cue.casefold() in normalized for cue in CLAIM_RELATION_CUES)
-
-
-def claim_key_terms(claim: str) -> list[str]:
-    clean = re.sub(r"\[(?:S)?\d+\]", " ", claim, flags=re.IGNORECASE)
-    for word in sorted(CLAIM_TOKEN_STOPWORDS, key=len, reverse=True):
-        clean = clean.replace(word, " ")
-    for cue in CLAIM_RELATION_CUES:
-        clean = clean.replace(cue, " ")
-    terms: list[str] = []
-    for match in re.finditer(r"[a-z0-9][a-z0-9_.-]{1,}", clean.casefold()):
-        term = match.group(0).strip("_.-")
-        if _is_valid_claim_term(term):
-            terms.append(term)
-    for match in re.finditer(r"[\u4e00-\u9fff]{2,}", clean):
-        chunk = match.group(0)
-        for part in re.split(r"[，。；、,/的和与及\s]+", chunk):
-            if _is_valid_claim_term(part):
-                terms.append(part)
-    return dedupe_preserve_order(terms)
-
-
-def _is_valid_claim_term(term: str) -> bool:
-    term = term.strip()
-    return bool(
-        term
-        and len(term) >= 2
-        and term.casefold() not in STOP_QUERY_TERMS
-        and term not in CLAIM_TOKEN_STOPWORDS
-        and term not in RELATION_TERMS_FOR_REMOVAL
-        and term not in PRONOUN_QUERY_TERMS
-    )
 
 
 def _format_evidence(index: int, hit: RetrievalHit) -> str:
@@ -1805,91 +989,19 @@ def _format_evidence(index: int, hit: RetrievalHit) -> str:
 
 def _citations(hits: list[RetrievalHit]) -> list[dict[str, Any]]:
     return [
-        {
-            "rank": index,
-            "title": hit.title,
-            "citation": hit.citation,
-            "chunk_id": hit.chunk_id,
-            "source_id": hit.source_id,
-        }
+        _citation_for_hit(index, hit)
         for index, hit in enumerate(hits[:8], 1)
     ]
 
 
-def _contextual_definition_extractive_answer(
-    question: str,
-    support_spans: list[SupportSpan],
-    *,
-    grounding: AnswerabilityResult,
-    relation_only: bool = False,
-) -> tuple[str | None, list[str]]:
-    if grounding.answer_mode != "contextual_definition" or not grounding.matched_cues:
-        return None, []
-
-    cue = grounding.matched_cues[0]
-    cue_key = cue.casefold()
-    for span in support_spans[:8]:
-        if cue_key not in span.text.casefold():
-            continue
-        sentence = normalize_whitespace(span.text)[:300]
-        relation = _contextual_relation_for_cue(cue, sentence)
-        if relation:
-            if _looks_chinese(question):
-                return f"根据你的个人知识库，{relation} [{span.span_id}]", [span.span_id]
-            return f"In your personal knowledge base, {relation} [{span.span_id}]", [span.span_id]
-        if relation_only:
-            continue
-        if _looks_chinese(question):
-            return f"根据你的个人知识库，{cue}在材料中被描述为：{sentence} [{span.span_id}]", [span.span_id]
-        return f"In your personal knowledge base, {cue} is described as: {sentence} [{span.span_id}]", [span.span_id]
-    return None, []
-
-
-def _should_prefer_contextual_definition_extractive_answer(
-    question: str,
-    grounding: AnswerabilityResult,
-) -> bool:
-    if grounding.answer_mode != "contextual_definition" or not grounding.matched_cues:
-        return False
-    cue = grounding.matched_cues[0]
-    normalized = re.sub(r"[\s\"'“”‘’《》？?。！!，,、：:；;（）()]+", "", question.casefold())
-    cue_key = re.sub(r"[\s\"'“”‘’《》]+", "", cue.casefold())
-    return normalized in {
-        f"{cue_key}是什么",
-        f"什么是{cue_key}",
-        f"{cue_key}是啥",
-        f"{cue_key}叫啥",
+def _citation_for_hit(rank: int, hit: RetrievalHit) -> dict[str, Any]:
+    return {
+        "rank": rank,
+        "title": hit.title,
+        "citation": hit.citation,
+        "chunk_id": hit.chunk_id,
+        "source_id": hit.source_id,
     }
-
-
-def _contextual_relation_for_cue(cue: str, sentence: str) -> str | None:
-    escaped = re.escape(cue)
-    patterns = (
-        (rf"([\u4e00-\u9fffA-Za-z0-9_.-]{{1,24}})最喜欢的歌是{escaped}", "{cue}是{subject}最喜欢的歌"),
-        (rf"([\u4e00-\u9fffA-Za-z0-9_.-]{{1,24}})最爱的歌(?:是|叫){escaped}", "{cue}是{subject}最爱的歌"),
-        (rf"([\u4e00-\u9fffA-Za-z0-9_.-]{{1,24}})又被称为{escaped}", "{cue}是{subject}的别名"),
-        (rf"{escaped}是([\u4e00-\u9fffA-Za-z0-9_.-]{{1,24}})的兄弟", "{cue}是{subject}的兄弟"),
-        (rf"{escaped}是([\u4e00-\u9fffA-Za-z0-9_.-]{{1,24}})的结拜大哥", "{cue}是{subject}的结拜大哥"),
-    )
-    for pattern, template in patterns:
-        match = re.search(pattern, sentence)
-        if not match:
-            continue
-        subject = match.group(1).strip(" ，,。；;：:")
-        if not subject:
-            continue
-        return template.format(cue=cue, subject=subject)
-    return None
-
-
-def _first_sentence_containing(text: str, cue_key: str) -> str | None:
-    for sentence in split_evidence_sentences(text):
-        if cue_key in sentence.casefold():
-            return sentence
-    normalized = normalize_whitespace(text)
-    if cue_key in normalized.casefold():
-        return normalized
-    return None
 
 
 def _chat_completions_url(base_url: str) -> str:

@@ -143,8 +143,6 @@ def build_summary(
         "llm_error_rate": avg("llm_error"),
         "model_fallback_rate": avg("model_fallback"),
         "partial_answer_rate": avg("partial_answer"),
-        "unsupported_claim_rate": avg("unsupported_claim"),
-        "mean_used_citation_count": avg("used_citation_count"),
         "forbidden_claim_rate": avg("forbidden_claim_hit"),
         "missing_ids": [row["id"] for row in rows if row["first_relevant_rank"] is None],
         "evidence_blocked_ids": [
@@ -152,7 +150,6 @@ def build_summary(
         ],
         "answer_failed_ids": [row["id"] for row in rows if row["answer_success"] != 1.0],
         "model_fallback_ids": [row["id"] for row in rows if row["model_fallback"] == 1.0],
-        "unsupported_claim_ids": [row["id"] for row in rows if row["unsupported_claim"] == 1.0],
         "forbidden_claim_failure_ids": [
             row["id"] for row in rows if row["forbidden_claim_hit"] == 1.0
         ],
@@ -191,9 +188,6 @@ def row_from_hits(
     answer_text = str(answer.get("answer") or "")
     answer_status = str(answer.get("answer_status") or "")
     answer_citations = answer.get("citations") if isinstance(answer.get("citations"), list) else []
-    grounding = answer.get("grounding") if isinstance(answer.get("grounding"), dict) else {}
-    unsupported_claims = grounding.get("unsupported_claims") if isinstance(grounding, dict) else []
-    used_span_ids = grounding.get("used_support_span_ids") if isinstance(grounding, dict) else []
     forbidden_patterns = list(case.get("forbidden_claim_patterns") or case.get("forbidden_terms") or [])
     forbidden_claim_hit = any(pattern_matches(answer_text, pattern) for pattern in forbidden_patterns)
     model_fallback = answer_status == "model_fallback" or retrieval_status == "model_fallback"
@@ -243,8 +237,7 @@ def row_from_hits(
         "llm_error": 1.0 if answer_status == "error" or answer.get("error") else 0.0,
         "model_fallback": 1.0 if model_fallback else 0.0,
         "partial_answer": 1.0 if answer_status == "partial" else 0.0,
-        "unsupported_claim": 1.0 if unsupported_claims else 0.0,
-        "used_citation_count": float(len(used_span_ids) if isinstance(used_span_ids, list) else len(answer_citations)),
+        "used_citation_count": float(len(answer_citations)),
         "forbidden_claim_patterns": forbidden_patterns,
         "forbidden_claim_hit": 1.0 if forbidden_claim_hit else 0.0,
         "answer_preview": answer_text[:240],

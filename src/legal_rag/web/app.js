@@ -1,5 +1,5 @@
-const STORAGE_KEY = "legal-rag-evidence-chat-v1";
-const LLM_CONFIG_KEY = "legal-rag-llm-config-v1";
+const STORAGE_KEY = "personal-notes-rag-project-evidence-chat-v1";
+const LLM_CONFIG_KEY = "personal-notes-rag-project-llm-config-v1";
 const ANSWER_MODE_VERSION = 2;
 const DEFAULT_LLM_PRESET = "ollama-qwen35";
 const DEFAULT_LLM_TIMEOUT_SECONDS = 45;
@@ -560,7 +560,7 @@ async function refreshHealth() {
     els.collectionName.textContent =
       data.store_backend === "memory" && manifestName
         ? `memory / ${manifestName}`
-        : data.collection || "legal_rag";
+        : data.collection || "personal_notes_rag";
     document.body.classList.remove("api-offline");
   } catch {
     els.apiStatus.textContent = "offline";

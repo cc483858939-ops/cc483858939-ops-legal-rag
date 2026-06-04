@@ -36,7 +36,7 @@ from legal_rag.query_intent import (
 from legal_rag.query_rewrite import build_query_extensions
 from legal_rag.relevance import EvidenceRelevanceGate, filter_relevant_hits, no_relevant_answer
 
-app = FastAPI(title="legal-rag", version="0.1.0")
+app = FastAPI(title="Personal Notes RAG Project", version="0.1.0")
 WEB_DIR = Path(__file__).resolve().parent / "web"
 app.mount("/static", StaticFiles(directory=WEB_DIR), name="static")
 DEFAULT_LLM_TIMEOUT_SECONDS = 45.0
@@ -328,31 +328,13 @@ def _trace_answer_grounding(answer_result: dict[str, Any], trace: TraceCollector
         "answer_mode",
         "matched_cues",
         "missing_evidence",
-        "answer_units",
-        "support_spans",
-        "claim_checks",
-        "unsupported_claims",
-        "used_support_span_ids",
+        "context_hit_count",
+        "relevant_hit_count",
         "retry_count",
         "retry_reason",
         "recovered_from_thinking",
     )
     output = {key: grounding[key] for key in fields if key in grounding}
-    if isinstance(output.get("support_spans"), list):
-        output["support_spans"] = [
-            _truncate_trace_text_fields(item, trace)
-            for item in output["support_spans"][: trace.max_items_per_stage]
-        ]
-    if isinstance(output.get("claim_checks"), list):
-        output["claim_checks"] = [
-            _truncate_trace_text_fields(item, trace)
-            for item in output["claim_checks"][: trace.max_items_per_stage]
-        ]
-    if isinstance(output.get("unsupported_claims"), list):
-        output["unsupported_claims"] = [
-            _truncate_trace_text_fields(item, trace)
-            for item in output["unsupported_claims"][: trace.max_items_per_stage]
-        ]
     return output
 
 

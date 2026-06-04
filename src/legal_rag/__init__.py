@@ -1,4 +1,4 @@
-"""Legal RAG package."""
+"""Personal Notes RAG Project package."""
 
 __all__ = ["__version__"]
 

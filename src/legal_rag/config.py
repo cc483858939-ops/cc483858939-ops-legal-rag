@@ -17,7 +17,7 @@ class Settings(BaseSettings):
 
     qdrant_url: str = "http://localhost:6333"
     qdrant_api_key: str | None = None
-    qdrant_collection: str = "legal_rag"
+    qdrant_collection: str = "personal_notes_rag"
     store_backend: str = "qdrant"
     corpus_manifest: str = str(ROOT_DIR / "configs" / "legal_sources.yml")
 

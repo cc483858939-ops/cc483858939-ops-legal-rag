@@ -444,20 +444,8 @@ def test_answer_endpoint_adds_llm_answer(monkeypatch, tmp_path) -> None:
                     "answer_mode": "direct",
                     "matched_cues": [],
                     "missing_evidence": [],
-                    "support_spans": [
-                        {
-                            "span_id": "S1",
-                            "text": "Refunds are issued within 7 business days after inspection approval.",
-                        }
-                    ],
-                    "claim_checks": [
-                        {
-                            "claim": "退款通常在验收通过后 7 个工作日内完成。",
-                            "supported": True,
-                            "support_span_ids": ["S1"],
-                        }
-                    ],
-                    "used_support_span_ids": ["S1"],
+                    "context_hit_count": len(hits),
+                    "relevant_hit_count": len(hits),
                 },
                 "llm": self.config.safe_dict(),
                 "usage": {"total_tokens": 12},
@@ -511,9 +499,8 @@ def test_answer_endpoint_adds_llm_answer(monkeypatch, tmp_path) -> None:
     traces = json.loads((tmp_path / "answer_traces.json").read_text(encoding="utf-8"))
     answer_stage = next(stage for stage in traces[0]["stages"] if stage["name"] == "answer_generation")
     assert answer_stage["output"]["grounding"]["answer_mode"] == "direct"
-    assert answer_stage["output"]["grounding"]["support_spans"][0]["span_id"] == "S1"
-    assert answer_stage["output"]["grounding"]["claim_checks"][0]["supported"] is True
-    assert answer_stage["output"]["grounding"]["used_support_span_ids"] == ["S1"]
+    assert answer_stage["output"]["grounding"]["context_hit_count"] == 1
+    assert answer_stage["output"]["grounding"]["relevant_hit_count"] == 1
 
 
 def test_answer_endpoint_routes_statement_without_retrieval(monkeypatch, tmp_path) -> None:
@@ -1441,7 +1428,7 @@ def test_answer_endpoint_does_not_post_fallback_when_retrieved_hit_has_matched_k
                 "reason": None,
                 "refused": False,
                 "answer_status": "answered",
-                "answer": "根据现有材料来看，没有关于“打火机”的定义。",
+                "answer": "根据你的个人知识库，打火机是炫神最喜欢的歌。[1]",
                 "citations": [{"rank": 1, "title": hits[0].title, "citation": hits[0].citation}],
                 "grounding": {
                     "question_type": "definition",
@@ -1506,7 +1493,7 @@ def test_answer_endpoint_does_not_post_fallback_when_retrieved_hit_has_matched_k
     assert data["relevance"]["matched_terms"] == ["打火机"]
     assert data["answer"]["answer_status"] == "answered"
     assert data["answer"]["grounding"]["matched_cues"] == ["打火机"]
-    assert data["answer"]["answer"] == "根据现有材料来看，没有关于“打火机”的定义。"
+    assert data["answer"]["answer"] == "根据你的个人知识库，打火机是炫神最喜欢的歌。[1]"
 
 
 def test_answer_endpoint_does_not_post_fallback_for_strict_kb_question(
@@ -2207,7 +2194,7 @@ def test_frontend_is_served() -> None:
     js_response = client.get("/static/app.js")
 
     assert index_response.status_code == 200
-    assert "Legal RAG" in index_response.text
+    assert "Personal Notes RAG Project" in index_response.text
     assert "thinkingToggle" in index_response.text
     assert "Thinking" in index_response.text
     assert css_response.status_code == 200
