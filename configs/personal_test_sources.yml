@@ -2,8 +2,7 @@ sources:
   - source_id: personal-test-note
     doc_type: note
     title: Personal Test Note
-    citation: Personal Test Note v1, Section personal-test
-    jurisdiction: PERSONAL
+    source_ref: Personal Test Note v1, Section personal-test
     date: "2026-05-19"
     section: personal-test
     path: ../data/corpus/personal_test/my_note.txt

@@ -19,9 +19,9 @@ services:
     container_name: personal-notes-rag-api
     environment:
       QDRANT_URL: http://qdrant:6333
-      QDRANT_COLLECTION: ${QDRANT_COLLECTION:-personal_notes_rag}
+      QDRANT_COLLECTION: ${QDRANT_COLLECTION:-personal_kb_rag}
       STORE_BACKEND: ${STORE_BACKEND:-qdrant}
-      CORPUS_MANIFEST: ${CORPUS_MANIFEST:-/app/configs/legal_sources.yml}
+      CORPUS_MANIFEST: ${CORPUS_MANIFEST:-/app/configs/personal_test_sources.yml}
       EMBEDDING_BACKEND: ${EMBEDDING_BACKEND:-fastembed}
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-BAAI/bge-small-zh-v1.5}
       SPARSE_BACKEND: ${SPARSE_BACKEND:-bm25_jieba}
@@ -61,7 +61,7 @@ services:
       - "8088:8080"
     depends_on:
       - qdrant
-    command: ["uvicorn", "legal_rag.api:app", "--host", "0.0.0.0", "--port", "8080"]
+    command: ["uvicorn", "personal_rag.api:app", "--host", "0.0.0.0", "--port", "8080"]
 
   cli:
     build:
@@ -72,9 +72,9 @@ services:
     container_name: personal-notes-rag-cli
     environment:
       QDRANT_URL: http://qdrant:6333
-      QDRANT_COLLECTION: ${QDRANT_COLLECTION:-personal_notes_rag}
+      QDRANT_COLLECTION: ${QDRANT_COLLECTION:-personal_kb_rag}
       STORE_BACKEND: ${STORE_BACKEND:-qdrant}
-      CORPUS_MANIFEST: ${CORPUS_MANIFEST:-/app/configs/legal_sources.yml}
+      CORPUS_MANIFEST: ${CORPUS_MANIFEST:-/app/configs/personal_test_sources.yml}
       EMBEDDING_BACKEND: ${EMBEDDING_BACKEND:-fastembed}
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-BAAI/bge-small-zh-v1.5}
       SPARSE_BACKEND: ${SPARSE_BACKEND:-bm25_jieba}
@@ -122,7 +122,7 @@ services:
     environment:
       QDRANT_URL: http://qdrant:6333
       STORE_BACKEND: qdrant
-      CORPUS_MANIFEST: /app/configs/legal_sources.yml
+      CORPUS_MANIFEST: /app/configs/personal_test_sources.yml
       SPARSE_BACKEND: bm25_jieba
       RERANKER_MODEL: ""
       INTENT_ROUTER_BACKEND: none

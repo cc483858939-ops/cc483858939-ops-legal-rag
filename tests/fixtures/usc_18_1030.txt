@@ -1,3 +1,0 @@
-Section 1030. Fraud and related activity in connection with computers.
-The statute addresses knowingly accessing a computer without authorization or exceeding authorized access and thereby obtaining information from a protected computer.
-It also covers intentionally accessing a protected computer without authorization and as a result causing damage and loss, and trafficking in passwords or similar information through which a computer may be accessed without authorization.
