@@ -1,21 +1,21 @@
 queries:
   - id: personal-memory
     query: "长期事实记忆适合保存什么"
-    expected_citations:
+    expected_sources:
       - "Personal Test Note v1, Section personal-test"
     category: personal_test
     tags: ["memory", "chinese"]
 
   - id: personal-rag-eval
     query: "RAG 回答质量应该怎么评估"
-    expected_citations:
+    expected_sources:
       - "Personal Test Note v1, Section personal-test"
     category: personal_test
     tags: ["rag", "eval", "chinese"]
 
   - id: personal-kb-assistant
-    query: "个人知识库助手和智能客服有什么区别"
-    expected_citations:
+    query: "个人知识库助手多做什么"
+    expected_sources:
       - "Personal Test Note v1, Section personal-test"
     category: personal_test
-    tags: ["assistant", "customer-support", "chinese"]
+    tags: ["assistant", "service-comparison", "chinese"]

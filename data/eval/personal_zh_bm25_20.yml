@@ -113,8 +113,8 @@ queries:
     category: rag_eval
     tags: ["real_user", "broad"]
 
-  - id: zh-real-kb-vs-support
-    query: "个人知识库助手比智能客服多做什么"
+  - id: zh-real-kb-vs-service-comparison
+    query: "个人知识库助手多做什么"
     expected_terms: ["沉淀知识", "更新笔记", "整理主题", "形成长期记忆"]
     category: personal_kb
     tags: ["real_user", "broad"]

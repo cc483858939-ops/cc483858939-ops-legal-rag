@@ -1,2 +1,0 @@
-Van Buren v. United States, 593 U.S. 374 (2021).
-The Supreme Court held that an individual exceeds authorized access under the Computer Fraud and Abuse Act when accessing areas of a computer such as files, folders, or databases that are off limits, not merely by misusing information that the person was otherwise authorized to access.

@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Personal Notes RAG Project</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700;800;900&family=Geist+Mono:wght@500;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <header class="app-header" aria-label="Personal Notes RAG Project workspace status">
+      <a class="brand" href="/" aria-label="Personal Notes RAG Project home">
+        <span class="brand-mark">PR</span>
+        <span>Personal Notes RAG Project</span>
+      </a>
+      <div class="runtime-strip">
+        <span class="status-pill">
+          <span class="pulse-dot" aria-hidden="true"></span>
+          <span id="apiStatus">Checking</span>
+        </span>
+        <span class="status-pill">Collection <strong id="collectionName">personal_kb_rag</strong></span>
+        <button class="ghost-button" id="clearBtn" type="button">清空</button>
+      </div>
+    </header>
+
+    <main class="docket-shell" aria-label="Personal Notes RAG Project evidence assistant">
+      <section class="empty-state" id="emptyState" aria-label="Start a retrieval chat">
+        <p class="kicker">Evidence-first personal knowledge retrieval</p>
+        <h1>今天想查什么资料？</h1>
+        <p class="intro-copy">
+          默认先查个人知识库；未命中时由模型用通用知识回答。关闭生成回答可只查看证据包。
+        </p>
+      </section>
+
+      <section class="chat-log" id="chatLog" aria-live="polite" aria-label="Retrieval conversation"></section>
+
+      <section class="composer-shell" aria-label="Ask the personal knowledge base">
+        <form class="prompt-bar" id="queryForm">
+          <textarea
+            id="questionInput"
+            rows="1"
+            spellcheck="true"
+            placeholder="有问题，尽管问"
+            aria-label="个人知识库检索问题"
+          ></textarea>
+          <div class="composer-toolbar">
+            <div class="composer-tools">
+              <button
+                class="thinking-toggle"
+                type="button"
+                id="thinkingToggle"
+                aria-pressed="false"
+                title="回答时启用模型思考"
+              >
+                <svg viewBox="0 0 24 24" focusable="false" aria-hidden="true">
+                  <path d="M12 3a6 6 0 0 0-3.2 11.1c.8.5 1.2 1.3 1.2 2.2V17h4v-.7c0-.9.5-1.8 1.2-2.2A6 6 0 0 0 12 3Z" />
+                  <path d="M10 21h4M10 17h4" />
+                </svg>
+                <span>Thinking</span>
+              </button>
+              <button class="icon-button" type="button" id="ingestBtn" title="导入默认语料">
+                <span aria-hidden="true">
+                  <svg viewBox="0 0 24 24" focusable="false">
+                    <path d="M12 3v12M7 10l5 5 5-5M5 21h14" />
+                  </svg>
+                </span>
+              </button>
+            </div>
+            <div class="composer-actions">
+              <span class="mode-readout" id="modeReadout">Hybrid</span>
+              <button class="send-button" id="sendBtn" type="submit" aria-label="查找资料">
+                <svg viewBox="0 0 24 24" focusable="false" aria-hidden="true">
+                  <path d="M5 12h14M13 6l6 6-6 6" />
+                </svg>
+              </button>
+            </div>
+          </div>
+        </form>
+
+        <details class="advanced-panel">
+          <summary>检索设置</summary>
+          <div class="control-row">
+            <div class="mode-switch" role="radiogroup" aria-label="Retrieval mode">
+              <button class="segment active" type="button" data-mode="hybrid">Hybrid</button>
+              <button class="segment" type="button" data-mode="dense">Dense</button>
+              <button class="segment" type="button" data-mode="bm25">BM25</button>
+            </div>
+            <label class="range-control" for="topK">
+              <span>Top K</span>
+              <output id="topKValue">8</output>
+              <input id="topK" type="range" min="1" max="20" value="8" />
+            </label>
+          </div>
+          <div class="filter-grid" aria-label="Metadata filters">
+            <label class="filter-field" for="filterDocType">
+              <span>文档类型</span>
+              <select id="filterDocType">
+                <option value="">不限</option>
+                <option value="note">Note</option>
+                <option value="document">Document</option>
+                <option value="memory">Memory</option>
+                <option value="faq">FAQ</option>
+                <option value="other">Other</option>
+              </select>
+            </label>
+            <label class="filter-field" for="filterDateFrom">
+              <span>起始日期</span>
+              <input id="filterDateFrom" type="date" />
+            </label>
+            <label class="filter-field" for="filterDateTo">
+              <span>结束日期</span>
+              <input id="filterDateTo" type="date" />
+            </label>
+            <label class="filter-field" for="filterDomain">
+              <span>领域</span>
+              <input id="filterDomain" type="text" placeholder="personal_kb" />
+            </label>
+            <label class="filter-field" for="filterCategory">
+              <span>分类</span>
+              <input id="filterCategory" type="text" placeholder="note" />
+            </label>
+            <label class="filter-field" for="filterLocale">
+              <span>语言</span>
+              <input id="filterLocale" type="text" placeholder="zh-cn" />
+            </label>
+          </div>
+        </details>
+
+        <details class="advanced-panel llm-panel">
+          <summary>回答模型</summary>
+          <div class="control-row llm-control-row">
+            <label class="toggle-field" for="answerEnabled">
+              <input id="answerEnabled" type="checkbox" checked />
+              <span>生成回答</span>
+            </label>
+            <label class="filter-field" for="llmPreset">
+              <span>模型预设</span>
+              <select id="llmPreset">
+                <option value="ollama-qwen35">Ollama Qwen 3.5 9B</option>
+                <option value="deepseek-chat">DeepSeek Chat</option>
+                <option value="openai-compatible">OpenAI Compatible</option>
+                <option value="openrouter">OpenRouter</option>
+                <option value="siliconflow">SiliconFlow</option>
+                <option value="lmstudio">LM Studio Local</option>
+                <option value="custom">Custom</option>
+              </select>
+            </label>
+          </div>
+          <div class="filter-grid" aria-label="Answer model configuration">
+            <label class="filter-field" for="llmBaseUrl">
+              <span>Base URL</span>
+              <input id="llmBaseUrl" type="text" spellcheck="false" />
+            </label>
+            <label class="filter-field" for="llmModel">
+              <span>Model</span>
+              <input id="llmModel" type="text" spellcheck="false" />
+            </label>
+            <label class="filter-field" for="llmApiKey">
+              <span>API Key</span>
+              <input id="llmApiKey" type="password" autocomplete="off" placeholder="只在本次请求发送" />
+            </label>
+            <label class="filter-field" for="llmTemperature">
+              <span>Temperature</span>
+              <input id="llmTemperature" type="number" min="0" max="2" step="0.1" value="0.2" />
+            </label>
+            <label class="filter-field" for="llmMaxTokens">
+              <span>Max tokens</span>
+              <input id="llmMaxTokens" type="number" min="64" max="4000" step="64" value="700" />
+            </label>
+          </div>
+        </details>
+
+        <div class="sample-row" aria-label="Sample retrieval questions">
+          <button class="sample-chip" type="button" data-sample="打火机是什么">
+            打火机是什么
+          </button>
+          <button class="sample-chip" type="button" data-sample="Faker是谁">
+            Faker是谁
+          </button>
+          <button class="sample-chip" type="button" data-sample="ShowMaker是谁">
+            ShowMaker是谁
+          </button>
+          <button class="sample-chip" type="button" data-sample="个人知识库助手多做什么">
+            个人助手差异
+          </button>
+        </div>
+      </section>
+    </main>
+
+    <template id="scoreTemplate">
+      <div class="score-grid"></div>
+    </template>
+
+    <script src="/static/app.js" defer></script>
+  </body>
+</html>

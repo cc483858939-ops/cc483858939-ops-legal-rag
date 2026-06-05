@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from legal_rag.observability import TraceCollector, read_trace_array
-from legal_rag.schema import RetrievalHit
+from personal_rag.observability import TraceCollector, read_trace_array
+from personal_rag.schema import RetrievalHit
 
 
 def test_trace_collector_keeps_default_recent_thirty(tmp_path) -> None:
@@ -31,7 +31,6 @@ def test_trace_collector_retention_count_is_configurable(tmp_path) -> None:
 
     traces = read_trace_array(trace_path)
 
-    assert len(traces) == 3
     assert [item["stages"][0]["input"]["query"] for item in traces] == ["q-1", "q-2", "q-3"]
 
 
@@ -64,14 +63,13 @@ def test_trace_stage_records_latency_and_error(tmp_path) -> None:
     assert trace.trace["errors"][0]["message"] == "bad rewrite"
 
 
-def test_trace_hit_summary_omits_full_text_by_default(tmp_path) -> None:
+def test_trace_hit_summary_uses_source_ref_and_omits_full_text_by_default(tmp_path) -> None:
     hit = RetrievalHit(
         chunk_id="1",
-        source_id="s",
-        doc_type="statute",
-        title="Notice",
-        citation="5 U.S.C. § 553",
-        jurisdiction="US",
+        source_id="personal-test-note",
+        doc_type="note",
+        title="Personal Test Note",
+        source_ref="Personal Test Note v1",
         text="x" * 1000,
         fusion_score=0.1,
     )
@@ -79,5 +77,6 @@ def test_trace_hit_summary_omits_full_text_by_default(tmp_path) -> None:
 
     summary = trace.hit_summary(hit, rank=1)
 
+    assert summary["source_ref"] == "Personal Test Note v1"
     assert "text" not in summary
     assert summary["snippet"] == "x" * 20

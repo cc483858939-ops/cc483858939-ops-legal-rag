@@ -10,16 +10,16 @@ from typing import Any
 
 import yaml
 
-from legal_rag.config import load_settings
-from legal_rag.evidence import (
+from personal_rag.config import load_settings
+from personal_rag.evidence import (
     retrieve_with_query_extensions_and_summary,
     select_rerank_query,
 )
-from legal_rag.factory import build_retriever, build_rewriter, build_store
-from legal_rag.ingest import ingest_manifest
-from legal_rag.query_rewrite import build_query_extensions
-from legal_rag.relevance import EvidenceRelevanceGate
-from legal_rag.schema import RetrievalHit
+from personal_rag.factory import build_retriever, build_rewriter, build_store
+from personal_rag.ingest import ingest_manifest
+from personal_rag.query_rewrite import build_query_extensions
+from personal_rag.relevance import EvidenceRelevanceGate
+from personal_rag.schema import RetrievalHit
 
 
 def parse_args() -> argparse.Namespace:
@@ -71,8 +71,8 @@ def hit_final_score(hit: RetrievalHit | dict[str, Any]) -> float:
     return float(hit.get("final_score", 0.0) or 0.0)
 
 
-def hit_citation(hit: RetrievalHit | dict[str, Any]) -> str | None:
-    return hit.citation if isinstance(hit, RetrievalHit) else hit.get("citation")
+def hit_source_ref(hit: RetrievalHit | dict[str, Any]) -> str | None:
+    return hit.source_ref if isinstance(hit, RetrievalHit) else hit.get("source_ref")
 
 
 def first_relevant_rank(
@@ -139,7 +139,7 @@ def build_summary(
         "grounded_answer_rate": avg("grounded_answer"),
         "answer_all_terms_rate": avg("answer_all_terms"),
         "answer_any_term_rate": avg("answer_any_term"),
-        "citation_present_rate": avg("citation_present"),
+        "source_present_rate": avg("source_present"),
         "llm_error_rate": avg("llm_error"),
         "model_fallback_rate": avg("model_fallback"),
         "partial_answer_rate": avg("partial_answer"),
@@ -187,7 +187,7 @@ def row_from_hits(
     answer = answer or {}
     answer_text = str(answer.get("answer") or "")
     answer_status = str(answer.get("answer_status") or "")
-    answer_citations = answer.get("citations") if isinstance(answer.get("citations"), list) else []
+    answer_sources = answer.get("sources") if isinstance(answer.get("sources"), list) else []
     forbidden_patterns = list(case.get("forbidden_claim_patterns") or case.get("forbidden_terms") or [])
     forbidden_claim_hit = any(pattern_matches(answer_text, pattern) for pattern in forbidden_patterns)
     model_fallback = answer_status == "model_fallback" or retrieval_status == "model_fallback"
@@ -195,7 +195,7 @@ def row_from_hits(
     grounded_answer = bool(
         retrieval_status == "retrieved"
         and answer_status in {"answered", "partial"}
-        and answer_citations
+        and answer_sources
     )
     answer_term_matches = [
         term.casefold() in answer_text.casefold()
@@ -221,7 +221,7 @@ def row_from_hits(
         "reranker_skipped": reranker_skipped,
         "top_score": hit_final_score(top_hit) if top_hit is not None else 0.0,
         "top_bm25_score": hit_bm25_score(top_hit) if top_hit is not None else 0.0,
-        "top_citation": hit_citation(top_hit) if top_hit is not None else None,
+        "top_source": hit_source_ref(top_hit) if top_hit is not None else None,
         "top_text_preview": hit_text(top_hit)[:160] if top_hit is not None else "",
         "candidate_hit_count": candidate_hit_count if candidate_hit_count is not None else len(hits),
         "relevant_hit_count": relevant_hit_count if relevant_hit_count is not None else len(hits),
@@ -233,11 +233,11 @@ def row_from_hits(
         "grounded_answer": 1.0 if grounded_answer else 0.0,
         "answer_all_terms": 1.0 if terms and all(answer_term_matches) else 0.0,
         "answer_any_term": 1.0 if any(answer_term_matches) else 0.0,
-        "citation_present": 1.0 if answer_citations else 0.0,
+        "source_present": 1.0 if answer_sources else 0.0,
         "llm_error": 1.0 if answer_status == "error" or answer.get("error") else 0.0,
         "model_fallback": 1.0 if model_fallback else 0.0,
         "partial_answer": 1.0 if answer_status == "partial" else 0.0,
-        "used_citation_count": float(len(answer_citations)),
+        "used_source_count": float(len(answer_sources)),
         "forbidden_claim_patterns": forbidden_patterns,
         "forbidden_claim_hit": 1.0 if forbidden_claim_hit else 0.0,
         "answer_preview": answer_text[:240],
